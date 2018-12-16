@@ -1,0 +1,29 @@
+﻿## Interface: 80100
+## Title: Misspelled
+## Version: 1.7.1
+## Author: Nate
+## Notes: Watches your chat, flagging missplled words, and offering correctly spelled suggestions.
+## DefaultState: Enabled
+## OptionalDeps: LibStub, CallbackHandler-1.0, Ace3
+## SavedVariables: Misspelled_DB
+## X-Website: http://wow.curse.com/downloads/wow-addons/details/misspelled.aspx
+## X-Curse-Project-Name: Misspelled
+## X-Curse-Project-ID: misspelled
+## X-Curse-Repository-ID: wow/misspelled/mainline
+
+embeds.xml
+Localization\Includes.xml
+
+UTF8\utf8data.lua
+UTF8\utf8.lua
+
+Dict\Dic_enUS.lua
+Dict\Dic_enGB.lua
+Dict\Dic_deDE.lua
+Dict\Dic_esES.lua
+Dict\Dic_frFR.lua
+Dict\Dic_itIT.lua
+Dict\Dic_ruRU.lua
+WordDict.lua
+Misspelled.lua
+Misspelled.xml
