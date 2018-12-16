@@ -127,10 +127,11 @@ local WordLocations = {}       --Lookup table used by multiple functions to dete
 local SkipOnTextChanged = false -- use to avoid OnTextChanged event firing after spell checking highlights chat text.
 local RightClickedWord = nil   --The current word under the CursorPosition that was right-clicked
 local RightClickedWordStartPos --Where that word starts
-local RightClickedWordStartPos --and where that word ends
+local RightClickedWordEndPos --and where that word ends
 local RightClickedEditBox      --and what EditBox was right clicked
 local OldLineLength            --Tracks the previous length of the ChatEditBox.text
 local GuildRosterCalled = false
+local MaxColorCodes = 12       --The max amount of color codes we will add to the editbox text.
 
 local Misspelled_Saved_CTL_SendChatMessage
 local Misspelled_CTL_hookedversion=0
@@ -409,6 +410,7 @@ function Misspelled:SpellCheckChat(editbox)
 	--Find misspelled words & populate the WordLocations info.
 	Misspelled:CheckLine(newText, editbox)
 
+	local colorCodesAdded = 0
 	--Use the WordLocation info to march backwords through the input text,
 	--highlighting misspellings
 	--tprint(WordLocations)
@@ -424,6 +426,17 @@ function Misspelled:SpellCheckChat(editbox)
 				newCPos = newCPos + #SPELLED_WRONG_HIGHLIGHT + #FONT_COLOR_CODE_CLOSE
 			elseif newCPos >= w.StartPos then
 				newCPos = newCPos + #SPELLED_WRONG_HIGHLIGHT
+			end
+
+			colorCodesAdded = colorCodesAdded + 1
+			if colorCodesAdded >= MaxColorCodes then 
+				--Truncate WordLocations to here, because there are too many misspelled words.
+				--The WoW chatbox won't let us add more than so many color coded sections.
+				
+				--Delete all entries before x
+				WordLocations[editbox:GetName()] = { unpack( WordLocations[editbox:GetName()], x ) }
+				
+				break
 			end
 		end
 	end

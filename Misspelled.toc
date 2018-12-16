@@ -1,6 +1,6 @@
 ﻿## Interface: 80100
 ## Title: Misspelled
-## Version: 1.7.1
+## Version: 1.7.2
 ## Author: Nate
 ## Notes: Watches your chat, flagging missplled words, and offering correctly spelled suggestions.
 ## DefaultState: Enabled
