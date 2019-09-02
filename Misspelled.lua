@@ -95,7 +95,7 @@ Misspelled = LibStub("AceAddon-3.0"):NewAddon("Misspelled", "AceEvent-3.0", "Ace
 
 local Misspelled = _G.Misspelled
 
-Misspelled.Version = "Misspelled v1.7.31"
+Misspelled.Version = "@project-version@"
 
 local AceGUI = LibStub("AceGUI-3.0")
 local L = LibStub("AceLocale-3.0"):GetLocale("Misspelled", true)
