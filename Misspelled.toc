@@ -6,7 +6,7 @@
 #@end-non-retail@
 ## Title: Misspelled
 ## Version: @project-version@
-## Author: Nate (Nathan Pieper)
+## Author: Nate (Nathan P)
 ## Notes: Watches your chat, flagging missplled words, and offering correctly spelled suggestions.
 ## DefaultState: Enabled
 ## OptionalDeps: LibStub, CallbackHandler-1.0, Ace3
