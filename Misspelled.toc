@@ -5,7 +5,7 @@
 # ## Interface: 11302
 #@end-non-retail@
 ## Title: Misspelled
-## Version: 1.7.31
+## Version: @project-version@
 ## Author: Nate
 ## Notes: Watches your chat, flagging missplled words, and offering correctly spelled suggestions.
 ## DefaultState: Enabled
