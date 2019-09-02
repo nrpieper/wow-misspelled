@@ -1,6 +1,7 @@
-﻿## Interface: 80100
+﻿## Interface: 80200
+## X-Min-Interface: 80200
 ## Title: Misspelled
-## Version: 1.7.2
+## Version: 1.7.3
 ## Author: Nate
 ## Notes: Watches your chat, flagging missplled words, and offering correctly spelled suggestions.
 ## DefaultState: Enabled
@@ -10,6 +11,8 @@
 ## X-Curse-Project-Name: Misspelled
 ## X-Curse-Project-ID: misspelled
 ## X-Curse-Repository-ID: wow/misspelled/mainline
+## X-Curse-Project-ID: 19114
+## X-WoWI-ID: 13493
 
 embeds.xml
 Localization\Includes.xml
