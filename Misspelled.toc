@@ -6,14 +6,13 @@
 #@end-non-retail@
 ## Title: Misspelled
 ## Version: @project-version@
-## Author: Nate (Nathan P)
+## Author: Nate (Nathan Pieper)
 ## Notes: Watches your chat, flagging missplled words, and offering correctly spelled suggestions.
 ## DefaultState: Enabled
 ## OptionalDeps: LibStub, CallbackHandler-1.0, Ace3
 ## SavedVariables: Misspelled_DB
 ## X-Website: http://wow.curse.com/downloads/wow-addons/details/misspelled.aspx
 ## X-Curse-Project-Name: Misspelled
-## X-Curse-Project-ID: misspelled
 ## X-Curse-Repository-ID: wow/misspelled/mainline
 ## X-Curse-Project-ID: 19114
 ## X-WoWI-ID: 13493
