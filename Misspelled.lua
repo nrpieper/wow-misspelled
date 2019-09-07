@@ -87,6 +87,8 @@ User Dictionary Editor Added
 (7/22/2010) - The Addon Gryphonheart Items (GHI) begins it's item color tags with a (|C) capitol c.  I added that possability to the chat text parsing.
 
 (9/14/2010) - Client 4 has some issues with trying to set the owner of the popmenu items.  Looks like it's not needed.
+
+(9/7/2019) - Wow Classic: When starting you can't have friends and the global function: GetNumFriends() is nil.  Detect and skip to eliminate the error.
 --]]--
 
 local _G = _G
@@ -1110,23 +1112,25 @@ function Misspelled:LoadGuildAndFriendRoster()
 	--print("Misspelled: Guild Members Loading...")
 
 	--First check your friends list
-	numFriends = GetNumFriends()
-	if numFriends > 0 then
-		for i = 1, numFriends do
-			name = GetFriendInfo(i)
-			if name ~= nil then
-				if #name > 0 then
-					if WordDict:Contains(name) == false then
-						--Look up the phonetic code for this friend name
-						if WordDict.soundslike == "Phonetic" then
-							pcode = WordDict:PhoneticCode(name)
-						elseif WordDict.soundslike == "Generic" then
-							pcode = WordDict:GenericSoundsLike(name)
-						else
-							pcode = ""
+	if GetNumFriends ~= nil then
+		numFriends = GetNumFriends()
+		if numFriends > 0 then
+			for i = 1, numFriends do
+				name = GetFriendInfo(i)
+				if name ~= nil then
+					if #name > 0 then
+						if WordDict:Contains(name) == false then
+							--Look up the phonetic code for this friend name
+							if WordDict.soundslike == "Phonetic" then
+								pcode = WordDict:PhoneticCode(name)
+							elseif WordDict.soundslike == "Generic" then
+								pcode = WordDict:GenericSoundsLike(name)
+							else
+								pcode = ""
+							end
+							--Add the friend name to the loaded dictionary
+							WordDict.baseWords[name] = "/" .. pcode
 						end
-						--Add the friend name to the loaded dictionary
-						WordDict.baseWords[name] = "/" .. pcode
 					end
 				end
 			end
@@ -1477,11 +1481,13 @@ end
 function Misspelled:IsFriend(name)
 	local numFriends
 
-	numFriends = GetNumFriends()
-	if numFriends > 0 then
-		for i = 1, numFriends do
-			if name == GetFriendInfo(i) then
-				return true
+	if GetNumFriends ~= nil then
+		numFriends = GetNumFriends()
+		if numFriends > 0 then
+			for i = 1, numFriends do
+				if name == GetFriendInfo(i) then
+					return true
+				end
 			end
 		end
 	end
