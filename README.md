@@ -1,6 +1,6 @@
 **Misspelled** is a chat spell-checker addon. Misspelled watches the chat messages you type, highlighting any misspellings and offering suggestions for any misspelled words it finds.
 
-![enter image description here](https://media.forgecdn.net/attachments/107/415/Misspelled_SS1.jpg)
+![Misspelled demo screenshot](https://raw.githubusercontent.com/nrpieper/wow-misspelled/master/misspelled-demo.jpg)
 
 I've included in the US & UK English dictionaries some Warcraft specific proper nouns, including the zone names, and all dungeon and raid boss names. Your friends and guild members are also automatically added and shouldn't get flagged as misspelled words. Misspelled utilizes the HunSpell style, affix (prefix/suffix) compressed dictionaries. The same ones used in Chrome, Firefox, and OpenOffice. Misspelled provides suggestions based on words that phonetically sound like the misspelled word, along with providing suggestions based on common mistakes of spelling. While Misspelled can detect nearly the same number of individually correctly spelled words as OpenOffice, it's suggestion engine, is "somewhat" less complicated, than the HunSpell implementation.
 
