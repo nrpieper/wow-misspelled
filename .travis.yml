@@ -7,8 +7,9 @@ addons:
 
 install: luarocks install --local luacheck
 before_script:
-script: 
-   - curl -s https://raw.githubusercontent.com/BigWigsMods/packager/master/release.sh | WOWI_API_TOKEN= GITHUB_OAUTH= bash -s -- -g 1.13.5
+script:
+   - curl -s https://raw.githubusercontent.com/BigWigsMods/packager/master/release.sh | WOWI_API_TOKEN= GITHUB_OAUTH= bash -s -- -g bcc 
+   - curl -s https://raw.githubusercontent.com/BigWigsMods/packager/master/release.sh | WOWI_API_TOKEN= GITHUB_OAUTH= bash -s -- -g classic
    - curl -s https://raw.githubusercontent.com/BigWigsMods/packager/master/release.sh | bash
 
 notifications:

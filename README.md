@@ -10,8 +10,8 @@ Misspelled works with WIM (Wow Instant Messenger), and is compatible with: Prat,
 
 **Usage note:** Spell Checking is performed as you complete each word you've typed. The last word in the chat box, isn't spell checked until you type some form of word terminator, either a period, space, or some other word separating punctuation. Spell checking is very fast; but isn't performed needlessly, while a word is being typed.
 
-Misspelled is compatible with WoW client patch 8.2 and WoW Classic If you are having problems with Misspelled, please try updating or disabling all other chat addons you may be running.
+Misspelled is compatible with WoW, WoW Classic and Wow Classic BTC If you are having problems with Misspelled, please try updating or disabling all other chat addons you may be running.
 
 **Distribution Points**  
-**Curse:** [http://www.curse.com/addons/wow/misspelled](http://www.curse.com/addons/wow/misspelled)  
+**Curseforge:** [https://www.curseforge.com/wow/addons/misspelled](hhttps://www.curseforge.com/wow/addons/misspelled)  
 **WowInterface:** [http://www.wowinterface.com/downloads/info13493-Misspelled.html](http://www.wowinterface.com/downloads/info13493-Misspelled.html)
