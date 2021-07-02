@@ -97,7 +97,7 @@ Misspelled = LibStub("AceAddon-3.0"):NewAddon("Misspelled", "AceEvent-3.0", "Ace
 
 local Misspelled = _G.Misspelled
 
-Misspelled.Version = "@project-version@"
+Misspelled.Version = "1.8.2"
 
 local AceGUI = LibStub("AceGUI-3.0")
 local L = LibStub("AceLocale-3.0"):GetLocale("Misspelled", true)
@@ -176,7 +176,7 @@ function Misspelled:OnInitialize()
 	-- Build Interface Options window
 	self:CreateInterfaceOptions()
 
-	--Watch for WIM to Load, then integrate
+	--Watch for other chat addons: Wim, to load and then integrate.
 	Misspelled:RegisterEvent("ADDON_LOADED")
 
 	--Guild members and Friends are valid words.
@@ -204,8 +204,6 @@ function Misspelled:OnInitialize()
 	-- hooks for removing any misspelled word highlighting in the text before the chat message is sent
 	-- The Wow client will disconnect if you attempt to send a color tags in a chat message.
 	Misspelled:RawHook("SendChatMessage", true)
-
-
 end
 
 
@@ -213,7 +211,7 @@ function Misspelled:WireUpEditBox(editbox)
 	Misspelled:SecureHookScript(editbox, "OnEscapePressed", Misspelled.EditBox_OnEscapePressed)
 	Misspelled:SecureHookScript(editbox, "OnEnterPressed", Misspelled.EditBox_OnEnterPressed)
 	Misspelled:SecureHookScript(editbox, "OnTextChanged", Misspelled.EditBox_OnTextChanged)
-	Misspelled:HookScript(editbox, "OnMouseUp", Misspelled.EditBox_OnMouseUp)  -- Used to hook mouse right-clicks
+	Misspelled:HookScript(editbox, "OnMouseUp", Misspelled.EditBox_OnMouseUp)  -- Used to hook mouse right-clicks to show suggestions frame
 end
 
 function Misspelled:GUILD_ROSTER_UPDATE()
@@ -235,7 +233,7 @@ function Misspelled:ADDON_LOADED(event, addonName)
 
 		--WIM sends its chat messages via the API ChatThrottleLib,
 		--ChatThrottleLib hooks the default SendChatMessage api, many times, before Misspelled can.
-		--ChatThrottleLib used in many addonds, that potentially load before Misspelled.
+		--ChatThrottleLib is used in many addonds, that potentially load before Misspelled.
 		--So we have to hook ChatThrottleLib just to be safe.
 
 
@@ -1046,6 +1044,13 @@ function Misspelled:EditUserDict()
 
 	f:AddChild(delButton)
 
+	--Check if the UserDict exist.  If not initalize it, creating a blank user dictionary.
+	if Misspelled_DB == nil then
+		Misspelled_DB = {UserDict = {}}
+	end
+	if Misspelled_DB.UserDict == nil then
+		Misspelled_DB.UserDict = {}
+	end
 
 	for k, v in pairs(Misspelled_DB.UserDict) do
 		local x = AceGUI:Create("InteractiveLabel")
@@ -1181,7 +1186,7 @@ function Misspelled:CreateInterfaceOptions()
 
 	local cfgFrameReloadTip = cfgFrame:CreateFontString("OVERLAY", nil, "GameFontNormal")
 	cfgFrameReloadTip:SetPoint("TOPLEFT", 20, -252)
-	cfgFrameReloadTip:SetText(L["Note: Reload the game UI, to load a new dictionary"])
+	cfgFrameReloadTip:SetText(L["Note: /reload the game UI to load a different selected dictionary"])
 
 	local cfgAutoSelectDict = CreateFrame("CHECKBUTTON", "Misspelled_cfgAutoSelectDict", cfgFrame, "InterfaceOptionsCheckButtonTemplate")
 	Misspelled_cfgAutoSelectDict:SetPoint("TOPLEFT", 20, -40)
