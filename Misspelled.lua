@@ -1186,7 +1186,7 @@ function Misspelled:CreateInterfaceOptions()
 
 	local cfgFrameReloadTip = cfgFrame:CreateFontString("OVERLAY", nil, "GameFontNormal")
 	cfgFrameReloadTip:SetPoint("TOPLEFT", 20, -252)
-	cfgFrameReloadTip:SetText(L["Note: /reload the game UI to load a different selected dictionary"])
+	cfgFrameReloadTip:SetText(L["Note: \/reload the game UI to load a different selected dictionary"])
 
 	local cfgAutoSelectDict = CreateFrame("CHECKBUTTON", "Misspelled_cfgAutoSelectDict", cfgFrame, "InterfaceOptionsCheckButtonTemplate")
 	Misspelled_cfgAutoSelectDict:SetPoint("TOPLEFT", 20, -40)
