@@ -1,6 +1,6 @@
-﻿## Interface: 90100
-## Interface-Classic: 11307
-## Interface-BCC: 20501
+﻿## Interface: 90105
+## Interface-Classic: 11401
+## Interface-BCC: 20502
 
 ## X-Curse-Project-ID: 19114
 ## X-Curse-Project-Name: Misspelled
