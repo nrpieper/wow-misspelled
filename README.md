@@ -13,5 +13,5 @@ Misspelled works with WIM (Wow Instant Messenger), and is compatible with: Prat,
 Misspelled is compatible with WoW, WoW Classic and Wow Classic BTC If you are having problems with Misspelled, please try updating or disabling all other chat addons you may be running.
 
 **Distribution Points**  
-**Curseforge:** [https://www.curseforge.com/wow/addons/misspelled](hhttps://www.curseforge.com/wow/addons/misspelled)  
-**WowInterface:** [http://www.wowinterface.com/downloads/info13493-Misspelled.html](http://www.wowinterface.com/downloads/info13493-Misspelled.html)
+**Curseforge:** [https://www.curseforge.com/wow/addons/misspelled](https://www.curseforge.com/wow/addons/misspelled)  
+**WowInterface:** [https://www.wowinterface.com/downloads/info13493-Misspelled.html](https://www.wowinterface.com/downloads/info13493-Misspelled.html)
