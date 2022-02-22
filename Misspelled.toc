@@ -1,6 +1,6 @@
-﻿## Interface: 90105
-## Interface-Classic: 11401
-## Interface-BCC: 20502
+﻿## Interface: 90200
+## Interface-Classic: 11402
+## Interface-BCC: 20503
 
 ## X-Curse-Project-ID: 19114
 ## X-Curse-Project-Name: Misspelled
@@ -11,7 +11,7 @@
 ## Title: Misspelled
 ## Version: @project-version@
 ## Author: Nate (Nathan Pieper)
-## Notes: Watches your chat, flagging missplled words, and offering correctly spelled suggestions.
+## Notes: Misspelled watches your chat, flagging missplled words, and offering correctly spelled suggestions.
 ## eMail: nrpieper@gmail.com
 ## X-Email: nrpieper@gmail.com
 ## X-Category: Chat
