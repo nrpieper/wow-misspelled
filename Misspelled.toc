@@ -1,9 +1,9 @@
-﻿## Interface: 90205
-## Interface-Classic: 11402
-## Interface-BCC: 20503
+﻿## Interface: 90207
+## Interface-Classic: 11403
+## Interface-BCC: 20504
 
 ## X-Curse-Project-ID: 19114
-## X-Curse-Project-Name: Misspelled
+## X-Curse-Project-Name: Misspelled - Chat Spellchecker
 ## X-Curse-Repository-ID: wow/misspelled/mainline
 ## X-Website: https://www.curseforge.com/wow/addons/misspelled
 ## X-WoWI-ID: 13493
