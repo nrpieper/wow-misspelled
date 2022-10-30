@@ -63589,6 +63589,24 @@ Words={
 "Vexis//WKSS",
 "Shadowland//XTLNT",
 "Lihuvim//LHFM",
+--(10/30/2022) Dragonflight 10.0
+"Dragonflight//TRKNFLT",
+"Dracthyr//TRK@R",
+"Tethalash//T@LX",
+"Neltharus//NL@RS",
+"Brackenhide//BRKNHT",
+"Weryn//WRN",
+"Galdera//KLTR",
+"Nokhud//NKHT",
+"Azmerloth//*SML@",
+"Ohn'ahran//*NRN",
+"Valdrakken//WLTRKN",
+"Frostone//FRSTN",
+"Vorquin//WKN",
+"Evoker//*FK",
+"Stormsunder//STMSNT",
+"Algeth'ar//*LK@",
+"Thaldraszus//@LTRSSS",
 }
 }
 end
