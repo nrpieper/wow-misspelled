@@ -48141,6 +48141,7 @@ Words={
 "Stormsunder//STMSNT",
 "Algeth'ar//*LK@",
 "Thaldraszus//@LTRSSS",
+"Oathstone//*@STN",
 }
 }
 end
