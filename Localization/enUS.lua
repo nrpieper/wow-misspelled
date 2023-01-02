@@ -18,6 +18,6 @@ L["Select words to remove:"] = true
 L["Removing the following words from the user dictionary"] = true
 
 --[[ Interface Options Window ]]--
-L["Note: \/reload the game UI to load a different selected dictionary"] = true
+L["Note: reload the game UI to load a different selected dictionary"] = true
 L["Auto Select Dictionary to Load"] = true
 L["Edit User Dictionary..."] = true
