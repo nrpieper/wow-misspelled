@@ -342,7 +342,7 @@ function Misspelled.EditBox_OnTextChanged(editbox)
 	--one character.
 	if pos == #text and newLineLength -1 == OldLineLength then
 		local lastChar = string_sub(text, -1, -1)
-		if string_match(lastChar, "[ \(\)\;,\.!\?:\"]") ~= nil then
+		if string_match(lastChar, "[ %(%);,%.!%?:\"]") ~= nil then
 			Misspelled:SpellCheckChat(editbox)
 		end
 	elseif pos ~= #text then
@@ -1186,7 +1186,7 @@ function Misspelled:CreateInterfaceOptions()
 
 	local cfgFrameReloadTip = cfgFrame:CreateFontString("OVERLAY", nil, "GameFontNormal")
 	cfgFrameReloadTip:SetPoint("TOPLEFT", 20, -252)
-	cfgFrameReloadTip:SetText(L["Note: \/reload the game UI to load a different selected dictionary"])
+	cfgFrameReloadTip:SetText(L["Note: reload the game UI to load a different selected dictionary"])
 
 	local cfgAutoSelectDict = CreateFrame("CHECKBUTTON", "Misspelled_cfgAutoSelectDict", cfgFrame, "InterfaceOptionsCheckButtonTemplate")
 	Misspelled_cfgAutoSelectDict:SetPoint("TOPLEFT", 20, -40)
