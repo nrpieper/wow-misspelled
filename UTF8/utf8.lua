@@ -171,16 +171,16 @@ local function utf8len (s)
 	local bytes = s:len()
 	local len = 0
 
-	while pos <= bytes and len ~= chars do
-		local c = s:byte(pos)
+	while pos <= bytes do
+		--local c = s:byte(pos)
 		len = len + 1
 
 		pos = pos + utf8charbytes(s, pos)
 	end
 
-	if chars ~= nil then
-		return pos - 1
-	end
+	--if chars ~= nil then
+	--	return pos - 1
+	--end
 
 	return len
 end
