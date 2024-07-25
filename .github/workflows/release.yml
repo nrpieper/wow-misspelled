@@ -29,7 +29,7 @@ jobs:
     steps:
       # we first have to clone the AddOn project, this is a required step
       - name: Clone project
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
         with:
           # you can specify how much of the commit history you want to fetch,
           # which is useful for controlling the length of the automated changelog
@@ -45,17 +45,17 @@ jobs:
 
       # Release - Retail
       - name: Package and release for Retail
-        uses: BigWigsMods/packager@v2
+        uses: BigWigsMods/packager@master
         with:
           args: -g retail
       # Release - Vanilla Classic
       - name: Package and release for Classic
-        uses: BigWigsMods/packager@v2
+        uses: BigWigsMods/packager@master
         with:
           args: -g classic
 
       # Release - Wrath Classic
       - name: Package and release for Wrath Classic
-        uses: BigWigsMods/packager@v2
+        uses: BigWigsMods/packager@master
         with:
           args: -g wrath
