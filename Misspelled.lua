@@ -1414,7 +1414,7 @@ function Misspelled:CreateInterfaceOptions()
 			Misspelled_cfgDictitIT:Enable()
 	end
 
-	InterfaceOptions_AddCategory(cfgFrame)
+	--InterfaceOptions_AddCategory(cfgFrame)
 end
 
 
