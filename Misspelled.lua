@@ -97,7 +97,7 @@ Misspelled = LibStub("AceAddon-3.0"):NewAddon("Misspelled", "AceEvent-3.0", "Ace
 
 local Misspelled = _G.Misspelled
 
-Misspelled.Version = "1.8.2"
+Misspelled.Version = "1.11.1"
 
 local AceGUI = LibStub("AceGUI-3.0")
 local L = LibStub("AceLocale-3.0"):GetLocale("Misspelled", true)
@@ -1414,7 +1414,14 @@ function Misspelled:CreateInterfaceOptions()
 			Misspelled_cfgDictitIT:Enable()
 	end
 
-	--InterfaceOptions_AddCategory(cfgFrame)
+	--Add options frame to the list of in-game addon options
+	--Adding addon options changed in Wow 11.0
+	if InterfaceOptions_AddCategory then -- Check for compatiability for older Wow clients.
+		InterfaceOptions_AddCategory(cfgFrame)  -- For Wow clients < v11
+	elseif Settings then -- For Wow clients > v11
+		local category, layout = Settings.RegisterCanvasLayoutCategory(cfgFrame, cfgFrame.name)
+		Settings.RegisterAddOnCategory(category)
+	end
 end
 
 
@@ -1450,9 +1457,9 @@ function Misspelled:split(str, patt)
 end
 
 function Misspelled:tprint (t, indent, done)
-  -- in case we run it standalone
+  -- in case we run it standalone outside of the Wow client Lua env
   local Note = Note or print
---  local Tell = Tell or io.write
+  --local Tell = Tell or io.write
 
   -- show strings differently to distinguish them from numbers
   local function show (val)
@@ -1462,6 +1469,7 @@ function Misspelled:tprint (t, indent, done)
       return tostring(val)
     end -- if
   end -- show
+  
   -- entry point here
   done = done or {}
   indent = indent or 0
