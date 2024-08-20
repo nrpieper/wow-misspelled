@@ -487,15 +487,17 @@ function Misspelled:CheckLine(text, editbox)
 
 	--Find if there are any links on this line, and replace them with the char: #, so they don't match as words
 	--in the next phase of parsing.
-	-- |[Cc].*|r
-	-- |[Cc]|H.+|h.+|h|r
-	-- |H.*|h
-	-- |T.*|t
-	-- |n newline character
+	-- |[Cc].*|r          -- Colored text
+	-- |[Cc]|H.+|h.+|h|r  -- Colored links
+	-- |H.*|h             -- Links
+	-- |T.*|t             -- Textures
+	-- {.-}               -- Raid target icons
+	-- |n                 -- newline character
 	local newText = text
 	newText = string_gsub(newText, "(|[Cc]%x-|H.-|h.-|h|r)", function(x) return string_rep("#", #x) end)
 	newText = string_gsub(newText, "(|H.*|h)", function(x) return string_rep("#", #x) end)
 	newText = string_gsub(newText, "(|T.*|t)", function(x) return string_rep("#", #x) end)
+	newText = string_gsub(newText, "({.-})", function(x) return string_rep("#", #x) end)
 	newText = string_gsub(newText, "(|n)", function(x) return string_rep("#", #x) end)
 
 
