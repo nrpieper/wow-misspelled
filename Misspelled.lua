@@ -97,7 +97,7 @@ Misspelled = LibStub("AceAddon-3.0"):NewAddon("Misspelled", "AceEvent-3.0", "Ace
 
 local Misspelled = _G.Misspelled
 
-Misspelled.Version = "1.11.2"
+Misspelled.Version = "1.11.x"
 
 local AceGUI = LibStub("AceGUI-3.0")
 local L = LibStub("AceLocale-3.0"):GetLocale("Misspelled", true)
@@ -485,8 +485,8 @@ function Misspelled:CheckLine(text, editbox)
 	if text == nil then return end
 	if #text == 0 then return end
 
-	--Find if there are any links on this line, and replace them with the char: #, so they don't match as words
-	--in the next phase of parsing.
+	--Find if there are any WoW Text Markup on this line, and replace them with the char: #, 
+	--so they don't match as words in the next stage of parsing.
 	-- |[Cc].*|r          -- Colored text
 	-- |[Cc]|H.+|h.+|h|r  -- Colored links
 	-- |H.*|h             -- Links
@@ -494,12 +494,23 @@ function Misspelled:CheckLine(text, editbox)
 	-- {.-}               -- Raid target icons
 	-- |n                 -- newline character
 	local newText = text
-	newText = string_gsub(newText, "(|[Cc]%x-|H.-|h.-|h|r)", function(x) return string_rep("#", #x) end)
-	newText = string_gsub(newText, "(|H.*|h)", function(x) return string_rep("#", #x) end)
-	newText = string_gsub(newText, "(|T.*|t)", function(x) return string_rep("#", #x) end)
-	newText = string_gsub(newText, "({.-})", function(x) return string_rep("#", #x) end)
-	newText = string_gsub(newText, "(|n)", function(x) return string_rep("#", #x) end)
+	-- newText = string_gsub(newText, "(|[Cc]%x-|H.-|h.-|h|r)", function(x) return string_rep("#", #x) end)
+	-- newText = string_gsub(newText, "(|H.*|h)", function(x) return string_rep("#", #x) end)
+	-- newText = string_gsub(newText, "(|T.*|t)", function(x) return string_rep("#", #x) end)
+	-- newText = string_gsub(newText, "({.-})", function(x) return string_rep("#", #x) end)
+	-- newText = string_gsub(newText, "(|n)", function(x) return string_rep("#", #x) end)
 
+	local WowTextMarkupEscapes = {
+		["(|[Cc]%x-|H.-|h.-|h|r)"] = "#", -- Colored text with optional colored links
+		["(|H.*|h)"] = "#",               -- Links
+		["(|T.*|t)"] = "#",               -- Textures
+		["({.-})"] = "#",                 -- Raid target icons
+		["(|n)"] = "#"                    -- Newline character
+	}
+
+	for k, v in pairs(WowTextMarkupEscapes) do
+        newText = string_gsub(newText, k, function(x) return string_rep(v, #x) end)
+    end
 
 	--March through the text, finding the words, record there start & end positions, and spell check status
 	local patt = "[A-Za-z0-9_'À-ÿœæŒÆ]+"
