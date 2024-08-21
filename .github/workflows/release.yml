@@ -61,7 +61,7 @@ jobs:
           args: -g wrath
 
       # Release - Cata Classic
-      - name: Package and release for Wrath Classic
+      - name: Package and release for Cata Classic
         uses: BigWigsMods/packager@master
         with:
           args: -g cata
