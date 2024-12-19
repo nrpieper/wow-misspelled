@@ -48219,6 +48219,9 @@ Words={
 "Voidstone//WTSTN",
 "Brann//BRN",
 "recraft//RKRFT",
+"Keyflame//KFLM",
+"Darkmoon//TKMN",
+"Worldsoul//WLTSL",
 }
 }
 end
