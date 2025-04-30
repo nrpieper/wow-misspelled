@@ -623,7 +623,7 @@ end
 -- which are typically used to assert that a sequence is not present.
 -- Therefore, a single Lua regular expression cannot directly say "match everything until |r, but fail if |h is encountered before that".
 --
---Strategy: 
+--Potential refactor: 
 -- 1) Use a regular expression to match any block starting with |cff7dc6fb and ending with |r, capturing everything in between.
 --    regex capture: |c%x-(.-)|r
 -- 2) Check the captures text to ensure it does not contain the sequence |h.
