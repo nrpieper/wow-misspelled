@@ -3,7 +3,7 @@
   Misspelled is an interactive chat text spell checker for World of Warcraft
 
   This code freely distributed for your use in any GPL compliant project.
-  Portions of this code are covered by the Gnu Plublic License (GPL)
+  Portions of this code are covered by the Gnu Public License (GPL)
   Dictionaries use the OpenOffice/HunSpell/ASpell dictionary format
   (http://wiki.services.openoffice.org/wiki/Dictionaries)
   Phonetic cache information created via the NetSpell dictionary util.
@@ -54,7 +54,7 @@ Note: An OnCursorChanged event doesn't exist or doesn't fire for the ChatEditBox
 
 Solution:
 Methods that insert or delete text from the ChatEditBox need to properly adjust the cursor
-position as needed when, visible or hidden, characters are insertted or deletted to the left of the cursor.
+position as needed when, visible or hidden, characters are inserted or deleted to the left of the cursor.
 
 Two techniques could be used.
 #1: Track the number of, printable and non-printable characters inserted or deleted
@@ -70,8 +70,8 @@ Issue #3 WIM Integration
 Wim allows multiple chat windows at once.  So we need to track WordLocations per editbox.
 Wim breaks long chat messages into multiple messages.
 Wim has a EditBox right click handler to insert emoticons and previous chat messages.
-WIM sends chat messages using ChatThrottleLib:SendChatMessage.  This can hot SendChatMessage before Missplled and bypasses the step that cleans the highlighting.
-(10/10/2009) Udpated hooks, from WIM, will be provided via WIM.RegisterPreSendFilterText(func()), to remove the need to manually hook ChatThrottleLib
+WIM sends chat messages using ChatThrottleLib:SendChatMessage.  This can hot SendChatMessage before Misspelled and bypasses the step that cleans the highlighting.
+(10/10/2009) Updated hooks, from WIM, will be provided via WIM.RegisterPreSendFilterText(func()), to remove the need to manually hook ChatThrottleLib
 
 User Dictionary Editor Added
 (12/6/2009) - Used AceGUI to add the ability to remove words from the user dictionary.
@@ -80,15 +80,17 @@ User Dictionary Editor Added
 
 (5/12/2010) - Added support for PTR Patch 3.5.  Multiple ChatEditBoxes get created.  Hook into the activate routine.
 
-(5/23/2010) - Fixed enGB dictionay load issue.
+(5/23/2010) - Fixed enGB dictionary load issue.
 
-(6/24/2010) - Addedd itIT Italian dictionary
+(6/24/2010) - Added itIT Italian dictionary
 
-(7/22/2010) - The Addon Gryphonheart Items (GHI) begins it's item color tags with a (|C) capitol c.  I added that possability to the chat text parsing.
+(7/22/2010) - The Addon Gryphonheart Items (GHI) begins it's item color tags with a (|C) capitol C character.  I added that possibility to the chat text parsing.
 
 (9/14/2010) - Client 4 has some issues with trying to set the owner of the popmenu items.  Looks like it's not needed.
 
 (9/7/2019) - Wow Classic: When starting you can't have friends and the global function: GetNumFriends() is nil.  Detect and skip to eliminate the error.
+
+(4/30/2025) - Changes added to RemoveHighlighting to parse new Item Quality # colors and Global Colors UI escape sequences.
 --]]--
 
 local _G = _G
@@ -105,6 +107,7 @@ local L = LibStub("AceLocale-3.0"):GetLocale("Misspelled", true)
 local table_insert = table.insert
 local string_byte = string.byte
 local string_find = string.find
+local string_format = string.format
 local string_gsub = string.gsub
 local string_len = string.len
 local string_lower = string.lower
@@ -119,13 +122,14 @@ local ipairs = ipairs
 --local SPELLED_WRONG_HIGHLIGHT =   "|cffff91c8" --The color misspelled words will get changed into.
 --local SPELLED_WRONG_HIGHLIGHT =   "|cffdea1d3" --The color misspelled words will get changed into.
 --local SPELLED_WRONG_HIGHLIGHT =   "|cfffefe80" --The color misspelled words will get changed into.
-local SPELLED_WRONG_HIGHLIGHT =   "|cff7dc6fb" --The color misspelled words will get changed into. (Medium-Cyan-ish)
+local SPELLED_WRONG_HIGHLIGHT_HEX_COLOR_CODE =   "ff7dc6fb" --The color misspelled words will get changed into. (Medium-Cyan-ish)
+local SPELLED_WRONG_HIGHLIGHT =   "|c"..SPELLED_WRONG_HIGHLIGHT_HEX_COLOR_CODE --The color misspelled words will get changed into. (Medium-Cyan-ish)
 
 local WordCache = {}           --Stores a cache of every word checked, along with the suggestions for words misspelled
 local WordCacheCount = 0       --Counter used to track when we should clean the WordCache table to save memory
 local WordCacheCountMax = 7000 --Number of entries tha can live in the WordCache before we clean the cache
-local WordLocations = {}       --Lookup table used by multiple functions to determin where each work starts and ends
-							   --There will be a subtable for each EditBox:GetName() so we can store multiple sets of info at once.
+local WordLocations = {}       --Lookup table used by multiple functions to determine where each work starts and ends
+							   --There will be a sub-table for each EditBox:GetName() so we can store multiple sets of info at once.
 local SkipOnTextChanged = false -- use to avoid OnTextChanged event firing after spell checking highlights chat text.
 local RightClickedWord = nil   --The current word under the CursorPosition that was right-clicked
 local RightClickedWordStartPos --Where that word starts
@@ -138,12 +142,32 @@ local MaxColorCodes = 12       --The max amount of color codes we will add to th
 local Misspelled_Saved_CTL_SendChatMessage
 local Misspelled_CTL_hookedversion=0
 
+--Output debug messages to the DevTool addon (https://github.com/brittyazel/DevTool)
+function Misspelled:AddToInspector(data, strName)
+	if DevTool and self.DEBUG then
+		local valType = type(data)
+
+		if valType == "string" then
+			-- from: https://github.com/Gethe/wow-ui-source/blob/live/Interface/AddOns/Blizzard_SharedXML/Dump.lua
+			-- %q  "quotes" the string and escapes any special characters within it (like double quotes, newlines, etc.)
+			-- replacing | with || outputs UI escaped sequence strings displaying all color and link details
+			data = string_gsub(string_format("%q", data), "[|]", "||")
+			DevTool:AddData(data, "Misspelled: " .. strName)
+		else
+			DevTool:AddData(data, "Misspelled: " .. strName)
+		end
+	end
+end
+
 function Misspelled:OnInitialize()
+    --Enable to output debug messages created with calls to: AddToInspector(data, strName), to the addon: DevTool
+	--self.DEBUG = true
+
 	if Misspelled_DB == nil then
 		Misspelled_DB = {}
 	end
 
-	--Check if the user has choosen to override the auto dictionary selection
+	--Check if the user has chosen to override the auto dictionary selection
 	if Misspelled_DB.LoadDictionary == nil then
 		Misspelled_DB.LoadDictionary = "enUS"
 	end
@@ -233,7 +257,7 @@ function Misspelled:ADDON_LOADED(event, addonName)
 
 		--WIM sends its chat messages via the API ChatThrottleLib,
 		--ChatThrottleLib hooks the default SendChatMessage api, many times, before Misspelled can.
-		--ChatThrottleLib is used in many addonds, that potentially load before Misspelled.
+		--ChatThrottleLib is used in many addons, that potentially load before Misspelled.
 		--So we have to hook ChatThrottleLib just to be safe.
 
 
@@ -256,7 +280,7 @@ function Misspelled:ADDON_LOADED(event, addonName)
 	end
 end
 
---Patch 3.5 Hook ChatFrame.lua ChatEdit_ActivaeChat(editBox)
+--Patch 3.5 Hook ChatFrame.lua ChatEdit_ActivateChat(editBox)
 function Misspelled:ChatEdit_ActivateChat(editBox)
 	--Make sure this editbox is hooked
 	--print("EditBox to hook: " .. editBox:GetName())
@@ -269,16 +293,19 @@ function Misspelled:ChatEdit_ActivateChat(editBox)
 end
 
 --Before a chat message is sent, remove any highlighting that Misspelled might have added.
---The Wow client will disconnect if you attempt to send a colored chat message.
+--The Wow client will disconnect if you attempt to send Hex code colored text in a chat message.
 function Misspelled:SendChatMessage(message, type, language, channel, ...)
-	local newText = Misspelled:RemoveHighlighting(message)
+	local cleanedMessage = Misspelled:RemoveHighlighting(message)
 
-	self.hooks["SendChatMessage"](newText, type, language, channel, ...);
+	--On DEBUG only
+	Misspelled:AddToInspector(cleanedMessage, "Misspelled:SendChatMessage - cleanedMessage")
+	
+	self.hooks["SendChatMessage"](cleanedMessage, type, language, channel, ...);
 end
 
 --Possible changes:
 --A single new character was inserted at the end of the line (line length grew by 1)
---	  If this char is a word seperator, then spell check the line
+--	  If this char is a word separator, then spell check the line
 --
 --Any other change in the line, requires we recheck the entire line.
 --More than a single character was pasted or linked into the line.
@@ -320,11 +347,11 @@ function Misspelled.EditBox_OnTextChanged(editbox)
 	end
 
 
-	--if the first char is a /, incidating some command, do no spellcheck.
+	--if the first char is a /, indicating some command, do no spellcheck.
 	if (string_sub(text, 1, 1) == "/" ) then
-		local newText = Misspelled:RemoveHighlighting(text)
-		if text ~= newText then
-			editbox:SetText(newText)
+		local cleanedChatMessage = Misspelled:RemoveHighlighting(text)
+		if text ~= cleanedChatMessage then
+			editbox:SetText(cleanedChatMessage)
 			if pos == 1 or pos== 0  then
 			  editbox:SetCursorPosition(pos)
 			end
@@ -337,7 +364,7 @@ function Misspelled.EditBox_OnTextChanged(editbox)
 	end
 
 
-	--If we currently just added one new char to the end of the line, see if it's a word boundry char
+	--If we currently just added one new char to the end of the line, see if it's a word boundary char
 	--CursorPosition (pos) must be at the end of the line, and the line size must have had grown by
 	--one character.
 	if pos == #text and newLineLength -1 == OldLineLength then
@@ -365,9 +392,9 @@ function Misspelled.EditBox_OnEnterPressed(editbox)
 	WordLocations[editbox:GetName()] = {}
 
 	--before message is sent, remove and misspelled highlighting
-	local newText = Misspelled:RemoveHighlighting(editbox:GetText())
+	local cleanedChatMessage = Misspelled:RemoveHighlighting(editbox:GetText())
 	WordLocations[editbox:GetName()] = {}
-	editbox:SetText(newText)
+	editbox:SetText(cleanedChatMessage)
 end
 
 
@@ -376,9 +403,9 @@ end
 --We should keep track of the current edit cursor position,
 --so we can report it's new position after highlighting.
 function Misspelled:SpellCheckChat(editbox)
-	local text = editbox:GetText()
+	local editboxText = editbox:GetText()
 
-	if #text < 2 then return end
+	if #editboxText < 2 then return end
 
 	--Ensure we have hooked the MouseUp event
 	--Should fix Chatter changing the OnMouseUp script to nil.  Bad Chatter
@@ -388,20 +415,20 @@ function Misspelled:SpellCheckChat(editbox)
 		Misspelled:RawHookScript(editbox, "OnMouseUp", Misspelled.EditBox_OnMouseUp)
 	end
 
-	local newText = text
+	local newText = editboxText
 
 	--Watch how many characters we insert or remove from the left side of the cursor position.
-	--We'll adjust it's position later to compensate for any "hidden" tags we added.
+	--We'll adjust the cursor position to compensate for any misspelled word Hex code colored text added by Misspelled.
 	local newCPos
 
-	--remove any previous misspelling highlighting
-	newText, newCPos = Misspelled:RemoveHighlighting(text, editbox:GetCursorPosition())
+	--remove any previous misspelling highlighting before checking the editboxText for misspellings.
+	newText, newCPos = Misspelled:RemoveHighlighting(editboxText, editbox:GetCursorPosition())
 
 	WordLocations[editbox:GetName()] = {}
 
 	--If this is a command, don't spellcheck or highlight
-	if string_sub(text, 1, 1) == "/" then
-		if newText ~= text then
+	if string_sub(editboxText, 1, 1) == "/" then
+		if newText ~= editboxText then
 			editbox:SetText(newText)
 			editbox:SetCursorPosition(newCPos)
 		end
@@ -411,7 +438,7 @@ function Misspelled:SpellCheckChat(editbox)
 	Misspelled:CheckLine(newText, editbox)
 
 	local colorCodesAdded = 0
-	--Use the WordLocation info to march backwords through the input text,
+	--Use the WordLocation info to march backwards through the input text,
 	--highlighting misspellings
 	--tprint(WordLocations)
 	local w
@@ -421,7 +448,7 @@ function Misspelled:SpellCheckChat(editbox)
 			--Insert highlighting
 			newText = string_sub(newText, 1, w.StartPos -1) .. SPELLED_WRONG_HIGHLIGHT .. string_sub(newText, w.StartPos, w.EndPos) .. FONT_COLOR_CODE_CLOSE .. string_sub(newText, w.EndPos + 1)
 
-			--Adjust cursor position if the cursur was to the right of the first char in the word we're highlighting.
+			--Adjust cursor position if the cursor was to the right of the first char in the word we're highlighting.
 			if newCPos >= w.EndPos then
 				newCPos = newCPos + #SPELLED_WRONG_HIGHLIGHT + #FONT_COLOR_CODE_CLOSE
 			elseif newCPos >= w.StartPos then
@@ -455,9 +482,9 @@ function Misspelled:SpellCheckChat(editbox)
 		end
 	end
 
-	if newText ~= text then
+	if newText ~= editboxText then
 		--When we call settext, an OnSetText event will fire.
-		--Execution of this even should be skipped to avoid SpellCheckChat from running twice.
+		--Execution of this event should be skipped to avoid SpellCheckChat from running twice.
 		--Use a local toggle to skip this second firing
 		SkipOnTextChanged = true
 		editbox:SetText(newText)
@@ -467,9 +494,12 @@ end
 
 
 
---Finds all words in the input text string, ignoring any Wow hyperlinks or textures
+--Finds all words in the input text string, ignoring any Wow hyperlinks or textures.
+--These links or textures will be replaced with a sequence of # characters, the same length of the color+link,
+--so the contents of these are not spellchecked.
+--
 --Next populate the table, WordLocations, storing the following info. on each word:
---	WordLocations[x] = {["word"] = word, ["StartPos"] = pos1, ["EndPos"] = pos2}
+--	WordLocations[x] = {["word"] = word, ["StartPos"] = matchPosStart, ["EndPos"] = matchPosEnd}
 --		x == Ordinal position of the word in the text string
 --
 --Next check each word to see we need to cache spell check info for the word.
@@ -485,14 +515,18 @@ function Misspelled:CheckLine(text, editbox)
 	if text == nil then return end
 	if #text == 0 then return end
 
-	--Find if there are any WoW Text Markup on this line, and replace them with the char: #, 
-	--so they don't match as words in the next stage of parsing.
-	-- |[Cc].*|r          -- Colored text
-	-- |[Cc]|H.+|h.+|h|r  -- Colored links
-	-- |H.*|h             -- Links
-	-- |T.*|t             -- Textures
-	-- {.-}               -- Raid target icons
-	-- |n                 -- newline character
+	--Find if there are any WoW UI escape sequences on this line, and replace them with # chars, 
+	--so they don't match as words in the next stage of parsing and get ignored for spellchecking.
+	--ref: https://warcraft.wiki.gg/wiki/UI_escape_sequences
+	-- |cn[^:]+:.*|r          -- Global Colors text (new in 11.1.5 - |cncolorname:text|r)
+	-- |cnIQ%d:.*|r           -- Item Quality Colors (new in 11.1.5 - |cnIQn:text|r
+	-- |[Cc]%x-|H.+|h.+|h|r   -- Hex color coded text with links (format: |cffxxxxxx|Htype:payload|h[text]|h|r ) https://warcraft.wiki.gg/wiki/Hyperlinks
+	-- |cn[^:]+:|H.+|h.+h|r   -- Global Colors / Custom item color links (new in 11.1.5 - |cncolorname:text|r) https://warcraft.wiki.gg/wiki/UI_escape_sequences#:~:text=back%20to%20white-,Global%20Colors,-%7Ccncolorname%3A
+	-- |H.*|h                 -- Links
+	-- |T.*|t                 -- Textures
+	-- |A.*|a                 -- Texture Atlas
+	-- {.-}                   -- Raid target icons
+	-- |n                     -- newline character
 	local newText = text
 	-- newText = string_gsub(newText, "(|[Cc]%x-|H.-|h.-|h|r)", function(x) return string_rep("#", #x) end)
 	-- newText = string_gsub(newText, "(|H.*|h)", function(x) return string_rep("#", #x) end)
@@ -501,9 +535,12 @@ function Misspelled:CheckLine(text, editbox)
 	-- newText = string_gsub(newText, "(|n)", function(x) return string_rep("#", #x) end)
 
 	local WowTextMarkupEscapes = {
-		["(|[Cc]%x-|H.-|h.-|h|r)"] = "#", -- Colored text with optional colored links
-		["(|H.*|h)"] = "#",               -- Links
-		["(|T.*|t)"] = "#",               -- Textures
+		["(|cn[^:]+:.-|r)"] = "#",        -- Global Colors text
+		["(|cnIQ%d:.-|r)"] = "#",         -- Item Quality Colors text
+		["(|[Cc]%x-|H.-|h.-|h|r)"] = "#", -- Hex color coded text with optional colored links
+		["(|H.-|h)"] = "#",               -- Links
+		["(|T.-|t)"] = "#",               -- Textures
+		["(|A.-|a)"] = "#",               -- Texture Atlas
 		["({.-})"] = "#",                 -- Raid target icons
 		["(|n)"] = "#"                    -- Newline character
 	}
@@ -514,23 +551,23 @@ function Misspelled:CheckLine(text, editbox)
 
 	--March through the text, finding the words, record there start & end positions, and spell check status
 	local patt = "[A-Za-z0-9_'À-ÿœæŒÆ]+"
-	local pos1
-	local pos2
+	local matchPosStart
+	local matchPosEnd
 
-	pos1, pos2 = string_find(newText, patt)
+	matchPosStart, matchPosEnd = string_find(newText, patt)
 
 	local x = 0
 	local word
 	local correct
-	while pos1 ~= nil do
-		word = string_sub(newText, pos1, pos2)
+	while matchPosStart ~= nil do
+		word = string_sub(newText, matchPosStart, matchPosEnd)
 
 		--ignore all uppercase words
 		if word ~= string_upper(word) then
 			--ignore words with numbers in them
 			if string_match(word, "[%d]") == nil then
 				x = x + 1
-				WordLocations[editbox:GetName()][x] = {["Word"] = word, ["StartPos"] = pos1, ["EndPos"] = pos2}
+				WordLocations[editbox:GetName()][x] = {["Word"] = word, ["StartPos"] = matchPosStart, ["EndPos"] = matchPosEnd}
 
 				if WordCache[word] == nil then
 					correct = false
@@ -566,19 +603,39 @@ function Misspelled:CheckLine(text, editbox)
 			end
 		end
 
-		pos1, pos2 = string_find(newText, patt, pos2+1)
+		matchPosStart, matchPosEnd = string_find(newText, patt, matchPosEnd+1)
 	end
 end
 
 
 
 --Return a string where the highlighting has been removed from any misspelled words,
---with the goal to not distroy any Wow itemLinks or textures. (http://www.wowwiki.com/ItemLink)
+--with the goal to not change or destroy any other UI escaped sequences present in the chat message,
+--such as colored text, Wow itemLinks or textures. 
+--(https://warcraft.wiki.gg/wiki/UI_escape_sequences & http://www.wowwiki.com/ItemLink)
 --
---It's possible that a recent edit has started to distroy the color tags, either at the
---begginning or end of a highlighted misspelled word.
---Attempt to detect this and remove any dangling tags.
+--Misspelled word highlighting is added with a Hex color coded UI escape sequence: |cff7dc6fbMisspelledtext|r
+--The chat message text may contain other UI escaped sequences such at item links.
+--The chat message text could also contain one or more pipe characters ||, complicating parsing.
+--
+-- Note: Lua's standard regular expression library has limitations compared to some other regex engines.
+-- It does not support features like negative lookahead assertions ((?!...)),
+-- which are typically used to assert that a sequence is not present.
+-- Therefore, a single Lua regular expression cannot directly say "match everything until |r, but fail if |h is encountered before that".
+--
+--Strategy: 
+-- 1) Use a regular expression to match any block starting with |cff7dc6fb and ending with |r, capturing everything in between.
+--    regex capture: |c%x-(.-)|r
+-- 2) Check the captures text to ensure it does not contain the sequence |h.
+--
+--It's possible that a recent edit has started to destroy the color tags, either at the
+--beginning or end of a highlighted misspelled word.
+--Attempt to detect this and remove any dangling colored text tags.
 function Misspelled:RemoveHighlighting(text, ...)
+	-- \124 is the ASCII code for the pipe '|' character.
+	--Misspelled:AddToInspector(string_gsub(text, "\124", "\124\124"), "RemoveHighlighting-input")
+	
+	local cleanedChatMessage
 	local newText = text
 
 	--Track the number of characters removed from the left side of the current cursor position.
@@ -590,22 +647,64 @@ function Misspelled:RemoveHighlighting(text, ...)
 	end
 
 	local itemLinks = {}
+	local itemLink
 	local itemLinkNum = 1
 
-	local patt, pos1, pos2
+	local patt, matchPosStart, matchPosEnd
 	local tokenSize
 	local tempToken
 	local tempText
 	local charsRemoved  --Tracks the chars removed from the left of the cursor
 
-	--Try and match Item links first.  The Addon GHI (Gryphonheart Items) colors links with a capitol C, non standard.
+	--Try and match Global Colors text. (|cncolorname:text|r)
+	--Use a non-greedy match character (-) in the match pattern rather than a greed match character (*)
+	patt = "(|cn[^:]+:.-|r)"
+	matchPosStart, matchPosEnd = string_find(newText, patt)
+
+	while matchPosStart ~= nil do
+		--Store the itemlink and it's relative position so it can be replaced latter
+		itemLink = string_sub(newText, matchPosStart, matchPosEnd)
+		itemLinks[itemLinkNum] = itemLink
+
+		tokenSize = #itemLink
+		tempToken = "{<<" .. tostring(itemLinkNum)
+		tempToken = tempToken .. string_rep(">", tokenSize - #tempToken - 1) .. "}"
+
+		--Replace this itemlink with a temporary placeholder code
+		newText = string_gsub(newText, patt, tempToken, 1)
+
+		itemLinkNum = itemLinkNum + 1
+		matchPosStart, matchPosEnd = string_find(newText, patt)
+	end
+
+	--Try and match (IQn) Item Quality Colors text. (|cnIQn:text|r)
+	--Use a non-greedy match character (-) in the match pattern rather than a greed match character (*)
+	patt = "(|cnIQ%d:.-|r)"
+	matchPosStart, matchPosEnd = string_find(newText, patt)
+
+	while matchPosStart ~= nil do
+		--Store the itemlink and it's relative position so it can be replaced latter
+		itemLink = string_sub(newText, matchPosStart, matchPosEnd)
+		itemLinks[itemLinkNum] = itemLink
+
+		tokenSize = #itemLink
+		tempToken = "{<<" .. tostring(itemLinkNum)
+		tempToken = tempToken .. string_rep(">", tokenSize - #tempToken - 1) .. "}"
+
+		--Replace this itemlink with a temporary placeholder code
+		newText = string_gsub(newText, patt, tempToken, 1)
+
+		itemLinkNum = itemLinkNum + 1
+		matchPosStart, matchPosEnd = string_find(newText, patt)
+	end
+
+	--Try and match Hex code colored Item links.  The Addon GHI (Gryphonheart Items) colors links with a capitol C, non-standard.
 	patt = "|[Cc]%x+|H.-|h.-|h|r"
-	pos1, pos2 = string_find(newText, patt)
+	matchPosStart, matchPosEnd = string_find(newText, patt)
 
-	local itemLink
-	while pos1 ~= nil do
+	while matchPosStart ~= nil do
 		--Store the itemlink and it's relative position so it can be replaced latter
-		itemLink = string_sub(newText, pos1, pos2)
+		itemLink = string_sub(newText, matchPosStart, matchPosEnd)
 		itemLinks[itemLinkNum] = itemLink
 
 		tokenSize = #itemLink
@@ -616,16 +715,16 @@ function Misspelled:RemoveHighlighting(text, ...)
 		newText = string_gsub(newText, patt, tempToken, 1)
 
 		itemLinkNum = itemLinkNum + 1
-		pos1, pos2 = string_find(newText, patt)
+		matchPosStart, matchPosEnd = string_find(newText, patt)
 	end
 
-	--Try to match, non colored Item Links
+	--Try to match, non-colored Item Links
 	patt = "|H.-|h"
-	pos1, pos2 = string_find(newText, patt)
+	matchPosStart, matchPosEnd = string_find(newText, patt)
 
-	while pos1 ~= nil do
+	while matchPosStart ~= nil do
 		--Store the itemlink and it's relative position so it can be replaced latter
-		itemLink = string_sub(newText, pos1, pos2)
+		itemLink = string_sub(newText, matchPosStart, matchPosEnd)
 		itemLinks[itemLinkNum] = itemLink
 
 		tokenSize = #itemLink
@@ -636,16 +735,16 @@ function Misspelled:RemoveHighlighting(text, ...)
 		newText = string_gsub(newText, patt, tempToken, 1)
 
 		itemLinkNum = itemLinkNum + 1
-		pos1, pos2 = string_find(newText, patt)
+		matchPosStart, matchPosEnd = string_find(newText, patt)
 	end
 
-	--Try to match and textures links.  (i.e. Raidtargets and there used when chatting with a GM)
+	--Try to match and textures links.  (i.e. Raid targets and there used when chatting with a GM)
 	patt = "|T.-|t"
-	pos1, pos2 = string_find(newText, patt)
+	matchPosStart, matchPosEnd = string_find(newText, patt)
 
-	while pos1 ~= nil do
+	while matchPosStart ~= nil do
 		--Store the itemlink and it's relative position so it can be replaced latter
-		itemLink = string_sub(newText, pos1, pos2)
+		itemLink = string_sub(newText, matchPosStart, matchPosEnd)
 		itemLinks[itemLinkNum] = itemLink
 
 		tokenSize = #itemLink
@@ -656,70 +755,76 @@ function Misspelled:RemoveHighlighting(text, ...)
 		newText = string_gsub(newText, patt, tempToken, 1)
 
 		itemLinkNum = itemLinkNum + 1
-		pos1, pos2 = string_find(newText, patt)
+		matchPosStart, matchPosEnd = string_find(newText, patt)
 	end
 
 
-	--Remove the highlighting from any misspelled words where the
-	--beginning and ending color tags correctly exist.
+	--Remove the highlighting from any misspelled words.
+	--i.e. When the beginning SPELLED_WRONG_HIGHLIGHT Hex coded color tag and ending |r tag wrap text.
 	--Adjust the cursor position as needed.
 	patt = SPELLED_WRONG_HIGHLIGHT .. "(.-)|r"
-	pos1, pos2 = string_find(newText, patt)
-	while pos1 ~= nil do
-		tempText = string_gsub(newText, patt, function(x) return x end, 1)
+
+	matchPosStart, matchPosEnd = string_find(newText, patt)
+
+	Misspelled:AddToInspector({_patt=string_gsub(patt,"[|]","||"),_newText=string_gsub(newText,"[|]","||"),_matchPosStart=matchPosStart,_matchPosEnd=matchPosEnd},"RemoveHighlighting string.find misspelled highlighting")
+
+	while matchPosStart ~= nil do
+		--strings.gsub(input, pattern, replaceText, n=limit the number of substations to be made)
+		tempText = string_gsub(newText, patt, "%1", 1)
+		--tempText = string_gsub(newText, patt, function(x) return x end, 1)
 
 		if #newText - #tempText ~= 0 then
 			charsRemoved = 0
 			--If the cursor was to the right of the start, subtract the num of deleted chars from the cursor position
-			if cPos >= pos1 then
+			if cPos >= matchPosStart then
 				charsRemoved = (#newText - #tempText)
 			end
 			--If the cursor was to the left of the end color tag and to the right of the start, add 2
-			if cPos >= pos1 and cPos < pos2 then
+			if cPos >= matchPosStart and cPos < matchPosEnd then
 				charsRemoved = charsRemoved - 2
 			end
 			cPos = cPos - charsRemoved
 		end
 		newText = tempText
 
-		pos1, pos2 = string_find(newText, patt)
+		matchPosStart, matchPosEnd = string_find(newText, patt)
 	end
 
 	--Remove any remaining orphaned beginning color tags.
 	patt = "|[Cc]%x%x%x%x%x%x%x%x"
-	pos1, pos2 = string_find(newText, patt)
-	while pos1 ~= nil do
+	matchPosStart, matchPosEnd = string_find(newText, patt)
+	while matchPosStart ~= nil do
 		tempText = string_gsub(newText, patt, "", 1)
 
 		if #newText - #tempText ~= 0 then
 			--If the cursor was to the right of the start, subtract the num of deleted chars from the cursor position
-			if cPos >= pos1 then
+			if cPos >= matchPosStart then
 				cPos = cPos - (#newText - #tempText)
 			end
 		end
 		newText = tempText
 
-		pos1, pos2 = string_find(newText, patt)
+		matchPosStart, matchPosEnd = string_find(newText, patt)
 	end
 
 	--Remove any remaining orphaned ending color tags.
 	patt = "|r"
-	pos1, pos2 = string_find(newText, patt)
-	while pos1 ~= nil do
+	matchPosStart, matchPosEnd = string_find(newText, patt)
+	while matchPosStart ~= nil do
 		tempText = string_gsub(newText, patt, "", 1)
 
 		if #newText - #tempText ~= 0 then
 			--If the cursor was to the right of the start, subtract the num of deleted chars from the cursor position
-			if cPos >= pos1 then
+			if cPos >= matchPosStart then
 				cPos = cPos - (#newText - #tempText)
 			end
 		end
 		newText = tempText
 
-		pos1, pos2 = string_find(newText, patt)
+		matchPosStart, matchPosEnd = string_find(newText, patt)
 	end
 
-	--Replace back the extracted item links
+	--Replace back the escape sequences extracted
 	if #itemLinks > 0 then
 		for i,val in ipairs(itemLinks) do
 			newText = string_gsub(newText, "{<<" .. tostring(i) .. ">-}", val)
@@ -727,16 +832,177 @@ function Misspelled:RemoveHighlighting(text, ...)
 	end
 
 
-	--If by chance the tracked cursor postition went negative, set it to 0
+	--If by chance the tracked cursor position went negative, set it to 0
 	if cPos < 0 then
 		cPos = 0
 	end
 
-	--cPos should never be > #newText, unless there's some unfuond error above
-	return newText, cPos
+	
+	cleanedChatMessage = newText
+	--cPos should never be > #newText, unless there's some unfound error above
+	return cleanedChatMessage, cPos
 end
 
+function Misspelled:TestRemoveHighlighting()
+	local testMessage
+	local checkMessage
+	local cleanedMessage
+	local newCPos
+	local testResult
 
+	--Test 1
+	testID = "1"
+	testMessage = "Apple"
+	checkMessage= "Apple"
+	cleanedMessage, newCPos = Misspelled:RemoveHighlighting(testMessage, string_len(testMessage))
+
+	local testResults_table = {
+		_testMessage = string_gsub(testMessage,"[|]","||"),
+		_checkMessage = string_gsub(checkMessage,"[|]","||"),
+		_cleanedMessage = string_gsub(cleanedMessage,"[|]","||"),
+		_CPos = string_len(testMessage),
+		_newCPos = newCPos
+	}
+
+	if cleanedMessage == checkMessage then testResult = "passed" else testResult = "failed" end
+    Misspelled:AddToInspector(testResults_table,"Test ".. testResult .. ": RemoveHighlighting "..testID)
+	
+	--Test2 - Misspelled highlighted word: Applez
+	testID = "2"
+	testMessage = "|cff7dc6fbApplez|r"
+	checkMessage= "Applez"
+	cleanedMessage, newCPos = Misspelled:RemoveHighlighting(testMessage, string_len(testMessage))
+
+	local testResults_table = {
+		_testMessage = string_gsub(testMessage,"[|]","||"),
+		_checkMessage = string_gsub(checkMessage,"[|]","||"),
+		_cleanedMessage = string_gsub(cleanedMessage,"[|]","||"),
+		_CPos = string_len(testMessage),
+		_newCPos = newCPos
+	}
+
+	if cleanedMessage == checkMessage then testResult = "passed" else testResult = "failed" end
+    Misspelled:AddToInspector(testResults_table,"Test ".. testResult .. ": RemoveHighlighting "..testID)
+	
+	--Test3 - Misspelled highlighted word: Applez good.
+	testID = "3"
+	testMessage = "|cff7dc6fbApplez|r good."
+	checkMessage= "Applez good."
+	cleanedMessage, newCPos = Misspelled:RemoveHighlighting(testMessage, string_len(testMessage))
+
+	local testResults_table = {
+		_testMessage = string_gsub(testMessage,"[|]","||"),
+		_checkMessage = string_gsub(checkMessage,"[|]","||"),
+		_cleanedMessage = string_gsub(cleanedMessage,"[|]","||"),
+		_CPos = string_len(testMessage),
+		_newCPos = newCPos
+	}
+
+	if cleanedMessage == checkMessage then testResult = "passed" else testResult = "failed" end
+    Misspelled:AddToInspector(testResults_table,"Test ".. testResult .. ": RemoveHighlighting "..testID)
+
+	--Test4 - Correctly spelled word [Link] correctly spelled word
+	testID = "4"
+	testMessage = "Test |cff71d5ff|Hspell:2061:0|h[Flash Heal]|h|r good."
+	checkMessage= "Test |cff71d5ff|Hspell:2061:0|h[Flash Heal]|h|r good."
+	cleanedMessage, newCPos = Misspelled:RemoveHighlighting(testMessage, string_len(testMessage))
+
+	local testResults_table = {
+		_testMessage = string_gsub(testMessage,"[|]","||"),
+		_checkMessage = string_gsub(checkMessage,"[|]","||"),
+		_cleanedMessage = string_gsub(cleanedMessage,"[|]","||"),
+		_CPos = string_len(testMessage),
+		_newCPos = newCPos
+	}
+
+	if cleanedMessage == checkMessage then testResult = "passed" else testResult = "failed" end
+	Misspelled:AddToInspector(testResults_table,"Test ".. testResult .. ": RemoveHighlighting "..testID)
+
+	--Test5 - Correctly spelled word [Spell Link] incorrectly spelled word
+	testID = "5"
+	testMessage = "Test |cff71d5ff|Hspell:2061:0|h[Flash Heal]|h|r |cff7dc6fbbadd|r."
+	checkMessage= "Test |cff71d5ff|Hspell:2061:0|h[Flash Heal]|h|r badd."
+	cleanedMessage, newCPos = Misspelled:RemoveHighlighting(testMessage, string_len(testMessage))
+
+	local testResults_table = {
+		_testMessage = string_gsub(testMessage,"[|]","||"),
+		_checkMessage = string_gsub(checkMessage,"[|]","||"),
+		_cleanedMessage = string_gsub(cleanedMessage,"[|]","||"),
+		_CPos = string_len(testMessage),
+		_newCPos = newCPos
+	}
+
+	if cleanedMessage == checkMessage then testResult = "passed" else testResult = "failed" end
+	Misspelled:AddToInspector(testResults_table,"Test ".. testResult .. ": RemoveHighlighting "..testID)
+
+	--Test6 - Correctly spelled word [Item link]
+	testID = "6"
+	testMessage = "Off-hand: |cffa335ee|Hitem:222566::::::::80:258::13:1:3524:6:40:2249:38:8:45:211296:46:226024:47:222584:48:224072:::::|h[Vagabond's Torch |A:Professions-ChatIcon-Quality-Tier5:17:17::1|a]|h|r"
+	checkMessage= "Off-hand: |cffa335ee|Hitem:222566::::::::80:258::13:1:3524:6:40:2249:38:8:45:211296:46:226024:47:222584:48:224072:::::|h[Vagabond's Torch |A:Professions-ChatIcon-Quality-Tier5:17:17::1|a]|h|r"
+	cleanedMessage, newCPos = Misspelled:RemoveHighlighting(testMessage, string_len(testMessage))
+
+	local testResults_table = {
+		_testMessage = string_gsub(testMessage,"[|]","||"),
+		_checkMessage = string_gsub(checkMessage,"[|]","||"),
+		_cleanedMessage = string_gsub(cleanedMessage,"[|]","||"),
+		_CPos = string_len(testMessage),
+		_newCPos = newCPos
+	}
+
+	if cleanedMessage == checkMessage then testResult = "passed" else testResult = "failed" end
+	Misspelled:AddToInspector(testResults_table,"Test ".. testResult .. ": RemoveHighlighting "..testID)
+	
+	--Test7 - Correctly spelled word [Hex colored Item link] incorrectly spelled word.
+	testID = "7"
+	testMessage = "Off-hand: |cffa335ee|Hitem:222566::::::::80:258::13:1:3524:6:40:2249:38:8:45:211296:46:226024:47:222584:48:224072:::::|h[Vagabond's Torch |A:Professions-ChatIcon-Quality-Tier5:17:17::1|a]|h|r |cff7dc6fbbadd|r."
+	checkMessage= "Off-hand: |cffa335ee|Hitem:222566::::::::80:258::13:1:3524:6:40:2249:38:8:45:211296:46:226024:47:222584:48:224072:::::|h[Vagabond's Torch |A:Professions-ChatIcon-Quality-Tier5:17:17::1|a]|h|r badd."
+	cleanedMessage, newCPos = Misspelled:RemoveHighlighting(testMessage, string_len(testMessage))
+
+	local testResults_table = {
+		_testMessage = string_gsub(testMessage,"[|]","||"),
+		_checkMessage = string_gsub(checkMessage,"[|]","||"),
+		_cleanedMessage = string_gsub(cleanedMessage,"[|]","||"),
+		_CPos = string_len(testMessage),
+		_newCPos = newCPos
+	}
+
+	if cleanedMessage == checkMessage then testResult = "passed" else testResult = "failed" end
+	Misspelled:AddToInspector(testResults_table,"Test ".. testResult .. ": RemoveHighlighting "..testID)
+
+	--Test8 - Correctly spelled word [cnIQ#: colored Item link]
+	testID = "8"
+	testMessage  = "test: |cnIQ2:|Hitem:225566::::::::80:258:::::::::|h[Warped Wing]|h|r"
+	checkMessage = "test: |cnIQ2:|Hitem:225566::::::::80:258:::::::::|h[Warped Wing]|h|r"
+	cleanedMessage, newCPos = Misspelled:RemoveHighlighting(testMessage, string_len(testMessage))
+
+	local testResults_table = {
+		_testMessage = string_gsub(testMessage,"[|]","||"),
+		_checkMessage = string_gsub(checkMessage,"[|]","||"),
+		_cleanedMessage = string_gsub(cleanedMessage,"[|]","||"),
+		_CPos = string_len(testMessage),
+		_newCPos = newCPos
+	}
+
+	if cleanedMessage == checkMessage then testResult = "passed" else testResult = "failed" end
+	Misspelled:AddToInspector(testResults_table,"Test ".. testResult .. ": RemoveHighlighting "..testID)
+
+	--Test9 - Correctly spelled word [cnIQ#: colored Item link] incorrectly spelled word.
+	testID = "9"
+	testMessage  = "test: |cnIQ2:|Hitem:225566::::::::80:258:::::::::|h[Warped Wing]|h|r |cff7dc6fbbadd|r."
+	checkMessage = "test: |cnIQ2:|Hitem:225566::::::::80:258:::::::::|h[Warped Wing]|h|r badd."
+	cleanedMessage, newCPos = Misspelled:RemoveHighlighting(testMessage, string_len(testMessage))
+
+	local testResults_table = {
+		_testMessage = string_gsub(testMessage,"[|]","||"),
+		_checkMessage = string_gsub(checkMessage,"[|]","||"),
+		_cleanedMessage = string_gsub(cleanedMessage,"[|]","||"),
+		_CPos = string_len(testMessage),
+		_newCPos = newCPos
+	}
+
+	if cleanedMessage == checkMessage then testResult = "passed" else testResult = "failed" end
+	Misspelled:AddToInspector(testResults_table,"Test ".. testResult .. ": RemoveHighlighting "..testID)
+end
 
 -------------------------------------------------------------------------
 --
@@ -806,7 +1072,7 @@ function MisspelledSuggestions_InitializeDropDown(level)
 		--If the misspelled word's first
 		info.text = s.Word
 
-		--If this suggestion is either a guild member or firend append a note.
+		--If this suggestion is either a guild member or friend append a note.
 		if Misspelled:IsGuildMember(s.Word) == true then
 			info.text = info.text .. " " .. L["(Guild)"]
 		else
@@ -819,11 +1085,11 @@ function MisspelledSuggestions_InitializeDropDown(level)
 		info.notCheckable = true
 		info.value = s.Word
 		info.func = function() SuggestionsFrame_Click(s.Word, RightClickedEditBox) end
-		--Add the above info to the optios menu as clickable item
+		--Add the above info to the options menu as clickable item
 		UIDropDownMenu_AddButton(info)
 	end
 
-	--Add a non clickable seperator
+	--Add a non clickable separator
 	info = UIDropDownMenu_CreateInfo()
 	--info.owner = this:GetParent()
 	info.text = ""
@@ -907,7 +1173,7 @@ function SuggestionsFrame_Click(value, editbox)
 		--replace this word with the selected suggestion.
 		--Remove the misspelled highlighting in the process.
 		--
-		--If the misspelled word was capitolized, capitolize the replacement.
+		--If the misspelled word was capitalized, capitalize the replacement.
 		if isCapitalizedRighClickedWord == true then
 			value = string_upper(string_sub(value, 1, 1)) .. string_sub(value, 2)
 		end
@@ -952,7 +1218,7 @@ end
 
 --Load the words saved in the Users dictionary into the baseWords table.
 --In r18 we changed the in memory format used to store the baseWords, affixCode and PhoneticCode,
---Saved a ton of memory not using a subtable per paseword.
+--Saved a ton of memory not using a sub-table per paseword.
 --If necessary convert the user dictionary storage to match the newer format.
 function Misspelled:LoadUserDict()
 	if Misspelled_DB == nil then
@@ -1057,7 +1323,7 @@ function Misspelled:EditUserDict()
 
 	f:AddChild(delButton)
 
-	--Check if the UserDict exist.  If not initalize it, creating a blank user dictionary.
+	--Check if the UserDict exist.  If not initialize it, creating a blank user dictionary.
 	if Misspelled_DB == nil then
 		Misspelled_DB = {UserDict = {}}
 	end
@@ -1075,7 +1341,7 @@ function Misspelled:EditUserDict()
 			--print("Clicked: " .. widget.label:GetText())
 
 			PlaySound(856) -- SOUNDKIT.IG_MAINMENU_OPTION_CHECKBOX_ON
-			--Check if item is slected or not
+			--Check if item is selected or not
 			local r,g,b,a = widget.label:GetTextColor()
 
 			if b == 0 then
