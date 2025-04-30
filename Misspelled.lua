@@ -634,6 +634,7 @@ end
 function Misspelled:RemoveHighlighting(text, ...)
 	-- \124 is the ASCII code for the pipe '|' character.
 	--Misspelled:AddToInspector(string_gsub(text, "\124", "\124\124"), "RemoveHighlighting-input")
+	--Blizzard uses string.gsub(textString, "[|]", "||"), in the /dump code 
 	
 	local cleanedChatMessage
 	local newText = text
