@@ -295,12 +295,12 @@ end
 --Before a chat message is sent, remove any highlighting that Misspelled might have added.
 --The Wow client will disconnect if you attempt to send Hex code colored text in a chat message.
 function Misspelled:SendChatMessage(message, type, language, channel, ...)
-	local cleanedMessage = Misspelled:RemoveHighlighting(message)
+	local gotMessage = Misspelled:RemoveHighlighting(message)
 
 	--On DEBUG only
-	Misspelled:AddToInspector(cleanedMessage, "Misspelled:SendChatMessage - cleanedMessage")
+	Misspelled:AddToInspector(gotMessage, "Misspelled:SendChatMessage - gotMessage")
 	
-	self.hooks["SendChatMessage"](cleanedMessage, type, language, channel, ...);
+	self.hooks["SendChatMessage"](gotMessage, type, language, channel, ...);
 end
 
 --Possible changes:
@@ -334,7 +334,7 @@ function Misspelled.EditBox_OnTextChanged(editbox)
 	local text = editbox:GetText()
 	local pos = editbox:GetCursorPosition()
 
-	--print ("TextChaged:", editbox:GetCursorPosition(), string.gsub(editbox:GetText(), "\124", "\124\124"))
+	--print ("TextChanged:", editbox:GetCursorPosition(), string.gsub(editbox:GetText(), "\124", "\124\124"))
 
 	local newLineLength = #text
 
@@ -590,7 +590,7 @@ function Misspelled:CheckLine(text, editbox)
 					--Cache the results
 					WordCache[word] = {["Correct"] = correct} --, ["Suggestions"] = {}}
 					WordCacheCount = WordCacheCount + 1
-					--Changed to delay searching for suggestions until someone righ-clicks on a missplled word.
+					--Changed to delay searching for suggestions until someone right-clicks on a misspelled word.
 					--Adding UTF8 support slows the suggestion generation.
 --~ 					if correct == false then
 --~ 						local suggestions = {}
@@ -846,162 +846,162 @@ end
 
 function Misspelled:TestRemoveHighlighting()
 	local testMessage
-	local checkMessage
-	local cleanedMessage
+	local wantedMessage
+	local gotMessage
 	local newCPos
 	local testResult
 
 	--Test 1
 	testID = "1"
 	testMessage = "Apple"
-	checkMessage= "Apple"
-	cleanedMessage, newCPos = Misspelled:RemoveHighlighting(testMessage, string_len(testMessage))
+	wantedMessage= "Apple"
+	gotMessage, newCPos = Misspelled:RemoveHighlighting(testMessage, string_len(testMessage))
 
 	local testResults_table = {
 		_testMessage = string_gsub(testMessage,"[|]","||"),
-		_checkMessage = string_gsub(checkMessage,"[|]","||"),
-		_cleanedMessage = string_gsub(cleanedMessage,"[|]","||"),
+		_wantedMessage = string_gsub(wantedMessage,"[|]","||"),
+		_gotMessage = string_gsub(gotMessage,"[|]","||"),
 		_CPos = string_len(testMessage),
 		_newCPos = newCPos
 	}
 
-	if cleanedMessage == checkMessage then testResult = "passed" else testResult = "failed" end
+	if gotMessage == wantedMessage then testResult = "passed" else testResult = "failed" end
     Misspelled:AddToInspector(testResults_table,"Test ".. testResult .. ": RemoveHighlighting "..testID)
 	
 	--Test2 - Misspelled highlighted word: Applez
 	testID = "2"
 	testMessage = "|cff7dc6fbApplez|r"
-	checkMessage= "Applez"
-	cleanedMessage, newCPos = Misspelled:RemoveHighlighting(testMessage, string_len(testMessage))
+	wantedMessage= "Applez"
+	gotMessage, newCPos = Misspelled:RemoveHighlighting(testMessage, string_len(testMessage))
 
 	local testResults_table = {
 		_testMessage = string_gsub(testMessage,"[|]","||"),
-		_checkMessage = string_gsub(checkMessage,"[|]","||"),
-		_cleanedMessage = string_gsub(cleanedMessage,"[|]","||"),
+		_wantedMessage = string_gsub(wantedMessage,"[|]","||"),
+		_gotMessage = string_gsub(gotMessage,"[|]","||"),
 		_CPos = string_len(testMessage),
 		_newCPos = newCPos
 	}
 
-	if cleanedMessage == checkMessage then testResult = "passed" else testResult = "failed" end
+	if gotMessage == wantedMessage then testResult = "passed" else testResult = "failed" end
     Misspelled:AddToInspector(testResults_table,"Test ".. testResult .. ": RemoveHighlighting "..testID)
 	
 	--Test3 - Misspelled highlighted word: Applez good.
 	testID = "3"
 	testMessage = "|cff7dc6fbApplez|r good."
-	checkMessage= "Applez good."
-	cleanedMessage, newCPos = Misspelled:RemoveHighlighting(testMessage, string_len(testMessage))
+	wantedMessage= "Applez good."
+	gotMessage, newCPos = Misspelled:RemoveHighlighting(testMessage, string_len(testMessage))
 
 	local testResults_table = {
 		_testMessage = string_gsub(testMessage,"[|]","||"),
-		_checkMessage = string_gsub(checkMessage,"[|]","||"),
-		_cleanedMessage = string_gsub(cleanedMessage,"[|]","||"),
+		_wantedMessage = string_gsub(wantedMessage,"[|]","||"),
+		_gotMessage = string_gsub(gotMessage,"[|]","||"),
 		_CPos = string_len(testMessage),
 		_newCPos = newCPos
 	}
 
-	if cleanedMessage == checkMessage then testResult = "passed" else testResult = "failed" end
+	if gotMessage == wantedMessage then testResult = "passed" else testResult = "failed" end
     Misspelled:AddToInspector(testResults_table,"Test ".. testResult .. ": RemoveHighlighting "..testID)
 
 	--Test4 - Correctly spelled word [Link] correctly spelled word
 	testID = "4"
 	testMessage = "Test |cff71d5ff|Hspell:2061:0|h[Flash Heal]|h|r good."
-	checkMessage= "Test |cff71d5ff|Hspell:2061:0|h[Flash Heal]|h|r good."
-	cleanedMessage, newCPos = Misspelled:RemoveHighlighting(testMessage, string_len(testMessage))
+	wantedMessage= "Test |cff71d5ff|Hspell:2061:0|h[Flash Heal]|h|r good."
+	gotMessage, newCPos = Misspelled:RemoveHighlighting(testMessage, string_len(testMessage))
 
 	local testResults_table = {
 		_testMessage = string_gsub(testMessage,"[|]","||"),
-		_checkMessage = string_gsub(checkMessage,"[|]","||"),
-		_cleanedMessage = string_gsub(cleanedMessage,"[|]","||"),
+		_wantedMessage = string_gsub(wantedMessage,"[|]","||"),
+		_gotMessage = string_gsub(gotMessage,"[|]","||"),
 		_CPos = string_len(testMessage),
 		_newCPos = newCPos
 	}
 
-	if cleanedMessage == checkMessage then testResult = "passed" else testResult = "failed" end
+	if gotMessage == wantedMessage then testResult = "passed" else testResult = "failed" end
 	Misspelled:AddToInspector(testResults_table,"Test ".. testResult .. ": RemoveHighlighting "..testID)
 
 	--Test5 - Correctly spelled word [Spell Link] incorrectly spelled word
 	testID = "5"
 	testMessage = "Test |cff71d5ff|Hspell:2061:0|h[Flash Heal]|h|r |cff7dc6fbbadd|r."
-	checkMessage= "Test |cff71d5ff|Hspell:2061:0|h[Flash Heal]|h|r badd."
-	cleanedMessage, newCPos = Misspelled:RemoveHighlighting(testMessage, string_len(testMessage))
+	wantedMessage= "Test |cff71d5ff|Hspell:2061:0|h[Flash Heal]|h|r badd."
+	gotMessage, newCPos = Misspelled:RemoveHighlighting(testMessage, string_len(testMessage))
 
 	local testResults_table = {
 		_testMessage = string_gsub(testMessage,"[|]","||"),
-		_checkMessage = string_gsub(checkMessage,"[|]","||"),
-		_cleanedMessage = string_gsub(cleanedMessage,"[|]","||"),
+		_wantedMessage = string_gsub(wantedMessage,"[|]","||"),
+		_gotMessage = string_gsub(gotMessage,"[|]","||"),
 		_CPos = string_len(testMessage),
 		_newCPos = newCPos
 	}
 
-	if cleanedMessage == checkMessage then testResult = "passed" else testResult = "failed" end
+	if gotMessage == wantedMessage then testResult = "passed" else testResult = "failed" end
 	Misspelled:AddToInspector(testResults_table,"Test ".. testResult .. ": RemoveHighlighting "..testID)
 
 	--Test6 - Correctly spelled word [Item link]
 	testID = "6"
 	testMessage = "Off-hand: |cffa335ee|Hitem:222566::::::::80:258::13:1:3524:6:40:2249:38:8:45:211296:46:226024:47:222584:48:224072:::::|h[Vagabond's Torch |A:Professions-ChatIcon-Quality-Tier5:17:17::1|a]|h|r"
-	checkMessage= "Off-hand: |cffa335ee|Hitem:222566::::::::80:258::13:1:3524:6:40:2249:38:8:45:211296:46:226024:47:222584:48:224072:::::|h[Vagabond's Torch |A:Professions-ChatIcon-Quality-Tier5:17:17::1|a]|h|r"
-	cleanedMessage, newCPos = Misspelled:RemoveHighlighting(testMessage, string_len(testMessage))
+	wantedMessage= "Off-hand: |cffa335ee|Hitem:222566::::::::80:258::13:1:3524:6:40:2249:38:8:45:211296:46:226024:47:222584:48:224072:::::|h[Vagabond's Torch |A:Professions-ChatIcon-Quality-Tier5:17:17::1|a]|h|r"
+	gotMessage, newCPos = Misspelled:RemoveHighlighting(testMessage, string_len(testMessage))
 
 	local testResults_table = {
 		_testMessage = string_gsub(testMessage,"[|]","||"),
-		_checkMessage = string_gsub(checkMessage,"[|]","||"),
-		_cleanedMessage = string_gsub(cleanedMessage,"[|]","||"),
+		_wantedMessage = string_gsub(wantedMessage,"[|]","||"),
+		_gotMessage = string_gsub(gotMessage,"[|]","||"),
 		_CPos = string_len(testMessage),
 		_newCPos = newCPos
 	}
 
-	if cleanedMessage == checkMessage then testResult = "passed" else testResult = "failed" end
+	if gotMessage == wantedMessage then testResult = "passed" else testResult = "failed" end
 	Misspelled:AddToInspector(testResults_table,"Test ".. testResult .. ": RemoveHighlighting "..testID)
 	
 	--Test7 - Correctly spelled word [Hex colored Item link] incorrectly spelled word.
 	testID = "7"
 	testMessage = "Off-hand: |cffa335ee|Hitem:222566::::::::80:258::13:1:3524:6:40:2249:38:8:45:211296:46:226024:47:222584:48:224072:::::|h[Vagabond's Torch |A:Professions-ChatIcon-Quality-Tier5:17:17::1|a]|h|r |cff7dc6fbbadd|r."
-	checkMessage= "Off-hand: |cffa335ee|Hitem:222566::::::::80:258::13:1:3524:6:40:2249:38:8:45:211296:46:226024:47:222584:48:224072:::::|h[Vagabond's Torch |A:Professions-ChatIcon-Quality-Tier5:17:17::1|a]|h|r badd."
-	cleanedMessage, newCPos = Misspelled:RemoveHighlighting(testMessage, string_len(testMessage))
+	wantedMessage= "Off-hand: |cffa335ee|Hitem:222566::::::::80:258::13:1:3524:6:40:2249:38:8:45:211296:46:226024:47:222584:48:224072:::::|h[Vagabond's Torch |A:Professions-ChatIcon-Quality-Tier5:17:17::1|a]|h|r badd."
+	gotMessage, newCPos = Misspelled:RemoveHighlighting(testMessage, string_len(testMessage))
 
 	local testResults_table = {
 		_testMessage = string_gsub(testMessage,"[|]","||"),
-		_checkMessage = string_gsub(checkMessage,"[|]","||"),
-		_cleanedMessage = string_gsub(cleanedMessage,"[|]","||"),
+		_wantedMessage = string_gsub(wantedMessage,"[|]","||"),
+		_gotMessage = string_gsub(gotMessage,"[|]","||"),
 		_CPos = string_len(testMessage),
 		_newCPos = newCPos
 	}
 
-	if cleanedMessage == checkMessage then testResult = "passed" else testResult = "failed" end
+	if gotMessage == wantedMessage then testResult = "passed" else testResult = "failed" end
 	Misspelled:AddToInspector(testResults_table,"Test ".. testResult .. ": RemoveHighlighting "..testID)
 
 	--Test8 - Correctly spelled word [cnIQ#: colored Item link]
 	testID = "8"
 	testMessage  = "test: |cnIQ2:|Hitem:225566::::::::80:258:::::::::|h[Warped Wing]|h|r"
-	checkMessage = "test: |cnIQ2:|Hitem:225566::::::::80:258:::::::::|h[Warped Wing]|h|r"
-	cleanedMessage, newCPos = Misspelled:RemoveHighlighting(testMessage, string_len(testMessage))
+	wantedMessage = "test: |cnIQ2:|Hitem:225566::::::::80:258:::::::::|h[Warped Wing]|h|r"
+	gotMessage, newCPos = Misspelled:RemoveHighlighting(testMessage, string_len(testMessage))
 
 	local testResults_table = {
 		_testMessage = string_gsub(testMessage,"[|]","||"),
-		_checkMessage = string_gsub(checkMessage,"[|]","||"),
-		_cleanedMessage = string_gsub(cleanedMessage,"[|]","||"),
+		_wantedMessage = string_gsub(wantedMessage,"[|]","||"),
+		_gotMessage = string_gsub(gotMessage,"[|]","||"),
 		_CPos = string_len(testMessage),
 		_newCPos = newCPos
 	}
 
-	if cleanedMessage == checkMessage then testResult = "passed" else testResult = "failed" end
+	if gotMessage == wantedMessage then testResult = "passed" else testResult = "failed" end
 	Misspelled:AddToInspector(testResults_table,"Test ".. testResult .. ": RemoveHighlighting "..testID)
 
 	--Test9 - Correctly spelled word [cnIQ#: colored Item link] incorrectly spelled word.
 	testID = "9"
 	testMessage  = "test: |cnIQ2:|Hitem:225566::::::::80:258:::::::::|h[Warped Wing]|h|r |cff7dc6fbbadd|r."
-	checkMessage = "test: |cnIQ2:|Hitem:225566::::::::80:258:::::::::|h[Warped Wing]|h|r badd."
-	cleanedMessage, newCPos = Misspelled:RemoveHighlighting(testMessage, string_len(testMessage))
+	wantedMessage = "test: |cnIQ2:|Hitem:225566::::::::80:258:::::::::|h[Warped Wing]|h|r badd."
+	gotMessage, newCPos = Misspelled:RemoveHighlighting(testMessage, string_len(testMessage))
 
 	local testResults_table = {
 		_testMessage = string_gsub(testMessage,"[|]","||"),
-		_checkMessage = string_gsub(checkMessage,"[|]","||"),
-		_cleanedMessage = string_gsub(cleanedMessage,"[|]","||"),
+		_wantedMessage = string_gsub(wantedMessage,"[|]","||"),
+		_gotMessage = string_gsub(gotMessage,"[|]","||"),
 		_CPos = string_len(testMessage),
 		_newCPos = newCPos
 	}
 
-	if cleanedMessage == checkMessage then testResult = "passed" else testResult = "failed" end
+	if gotMessage == wantedMessage then testResult = "passed" else testResult = "failed" end
 	Misspelled:AddToInspector(testResults_table,"Test ".. testResult .. ": RemoveHighlighting "..testID)
 end
 
@@ -1143,10 +1143,10 @@ function SuggestionsFrame_Click(value, editbox)
 	local newText = editbox:GetText()
 	local newCurcorPos = nil
 
-	local isCapitalizedRighClickedWord = false
+	local isCapitalizedRightClickedWord = false
 
 	if string_sub(RightClickedWord, 1, 1) == string_upper(string_sub(RightClickedWord, 1, 1)) then
-		isCapitalizedRighClickedWord = true
+		isCapitalizedRightClickedWord = true
 	end
 
 	if value == "###IgnoreAll" then
@@ -1175,7 +1175,7 @@ function SuggestionsFrame_Click(value, editbox)
 		--Remove the misspelled highlighting in the process.
 		--
 		--If the misspelled word was capitalized, capitalize the replacement.
-		if isCapitalizedRighClickedWord == true then
+		if isCapitalizedRightClickedWord == true then
 			value = string_upper(string_sub(value, 1, 1)) .. string_sub(value, 2)
 		end
 		newText = string_sub(newText, 1, RightClickedWordStartPos - 1 - #SPELLED_WRONG_HIGHLIGHT) .. value .. string_sub(newText, RightClickedWordEndPos + #FONT_COLOR_CODE_CLOSE + 1)
