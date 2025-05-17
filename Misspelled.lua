@@ -1406,9 +1406,9 @@ function Misspelled:LoadGuildAndFriendRoster()
 					if #name > 0 then
 						if WordDict:Contains(name) == false then
 							--Look up the phonetic code for this friend name
-							if WordDict.soundslike == "Phonetic" then
+							if WordDict.soundslike == WordDict.Const.SoundslikeAlgorithms.PHONETIC then
 								pcode = WordDict:PhoneticCode(name)
-							elseif WordDict.soundslike == "Generic" then
+							elseif WordDict.soundslike == WordDict.Const.SoundslikeAlgorithms.GENERIC then
 								pcode = WordDict:GenericSoundsLike(name)
 							else
 								pcode = ""
@@ -1432,9 +1432,9 @@ function Misspelled:LoadGuildAndFriendRoster()
 					if #name ~= 0 then
 						if WordDict:Contains(name) == false then
 							--Look up the phonetic code for this guild member name
-							if WordDict.soundslike == "Phonetic" then
+							if WordDict.soundslike == WordDict.Const.SoundslikeAlgorithms.PHONETIC then
 								pcode = WordDict:PhoneticCode(name)
-							elseif WordDict.soundslike == "Generic" then
+							elseif WordDict.soundslike == WordDict.Const.SoundslikeAlgorithms.GENERIC then
 								pcode = WordDict:GenericSoundsLike(name)
 							else
 								pcode = ""
