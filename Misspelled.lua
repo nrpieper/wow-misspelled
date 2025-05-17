@@ -323,7 +323,7 @@ function Misspelled.EditBox_OnTextChanged(editbox)
 	--Load the guild roster if needed
 	if GuildRosterCalled == false then
 		if IsInGuild() == 1 then
-			GuildRoster()
+			C_GuildInfo.GuildRoster() --Request updated guid roseter info from the server
 		else
 			Misspelled:LoadGuildAndFriendRoster()
 		end
@@ -845,6 +845,7 @@ function Misspelled:RemoveHighlighting(text, ...)
 end
 
 function Misspelled:TestRemoveHighlighting()
+	local testId
 	local testMessage
 	local wantedMessage
 	local gotMessage
@@ -852,7 +853,7 @@ function Misspelled:TestRemoveHighlighting()
 	local testResult
 
 	--Test 1
-	testID = "1"
+	testId = "1"
 	testMessage = "Apple"
 	wantedMessage= "Apple"
 	gotMessage, newCPos = Misspelled:RemoveHighlighting(testMessage, string_len(testMessage))
@@ -866,10 +867,10 @@ function Misspelled:TestRemoveHighlighting()
 	}
 
 	if gotMessage == wantedMessage then testResult = "passed" else testResult = "failed" end
-    Misspelled:AddToInspector(testResults_table,"Test ".. testResult .. ": RemoveHighlighting "..testID)
+    Misspelled:AddToInspector(testResults_table,"Test ".. testResult .. ": RemoveHighlighting "..testId)
 	
 	--Test2 - Misspelled highlighted word: Applez
-	testID = "2"
+	testId = "2"
 	testMessage = "|cff7dc6fbApplez|r"
 	wantedMessage= "Applez"
 	gotMessage, newCPos = Misspelled:RemoveHighlighting(testMessage, string_len(testMessage))
@@ -883,10 +884,10 @@ function Misspelled:TestRemoveHighlighting()
 	}
 
 	if gotMessage == wantedMessage then testResult = "passed" else testResult = "failed" end
-    Misspelled:AddToInspector(testResults_table,"Test ".. testResult .. ": RemoveHighlighting "..testID)
+    Misspelled:AddToInspector(testResults_table,"Test ".. testResult .. ": RemoveHighlighting "..testId)
 	
 	--Test3 - Misspelled highlighted word: Applez good.
-	testID = "3"
+	testId = "3"
 	testMessage = "|cff7dc6fbApplez|r good."
 	wantedMessage= "Applez good."
 	gotMessage, newCPos = Misspelled:RemoveHighlighting(testMessage, string_len(testMessage))
@@ -900,10 +901,10 @@ function Misspelled:TestRemoveHighlighting()
 	}
 
 	if gotMessage == wantedMessage then testResult = "passed" else testResult = "failed" end
-    Misspelled:AddToInspector(testResults_table,"Test ".. testResult .. ": RemoveHighlighting "..testID)
+    Misspelled:AddToInspector(testResults_table,"Test ".. testResult .. ": RemoveHighlighting "..testId)
 
 	--Test4 - Correctly spelled word [Link] correctly spelled word
-	testID = "4"
+	testId = "4"
 	testMessage = "Test |cff71d5ff|Hspell:2061:0|h[Flash Heal]|h|r good."
 	wantedMessage= "Test |cff71d5ff|Hspell:2061:0|h[Flash Heal]|h|r good."
 	gotMessage, newCPos = Misspelled:RemoveHighlighting(testMessage, string_len(testMessage))
@@ -917,10 +918,10 @@ function Misspelled:TestRemoveHighlighting()
 	}
 
 	if gotMessage == wantedMessage then testResult = "passed" else testResult = "failed" end
-	Misspelled:AddToInspector(testResults_table,"Test ".. testResult .. ": RemoveHighlighting "..testID)
+	Misspelled:AddToInspector(testResults_table,"Test ".. testResult .. ": RemoveHighlighting "..testId)
 
 	--Test5 - Correctly spelled word [Spell Link] incorrectly spelled word
-	testID = "5"
+	testId = "5"
 	testMessage = "Test |cff71d5ff|Hspell:2061:0|h[Flash Heal]|h|r |cff7dc6fbbadd|r."
 	wantedMessage= "Test |cff71d5ff|Hspell:2061:0|h[Flash Heal]|h|r badd."
 	gotMessage, newCPos = Misspelled:RemoveHighlighting(testMessage, string_len(testMessage))
@@ -934,10 +935,10 @@ function Misspelled:TestRemoveHighlighting()
 	}
 
 	if gotMessage == wantedMessage then testResult = "passed" else testResult = "failed" end
-	Misspelled:AddToInspector(testResults_table,"Test ".. testResult .. ": RemoveHighlighting "..testID)
+	Misspelled:AddToInspector(testResults_table,"Test ".. testResult .. ": RemoveHighlighting "..testId)
 
 	--Test6 - Correctly spelled word [Item link]
-	testID = "6"
+	testId = "6"
 	testMessage = "Off-hand: |cffa335ee|Hitem:222566::::::::80:258::13:1:3524:6:40:2249:38:8:45:211296:46:226024:47:222584:48:224072:::::|h[Vagabond's Torch |A:Professions-ChatIcon-Quality-Tier5:17:17::1|a]|h|r"
 	wantedMessage= "Off-hand: |cffa335ee|Hitem:222566::::::::80:258::13:1:3524:6:40:2249:38:8:45:211296:46:226024:47:222584:48:224072:::::|h[Vagabond's Torch |A:Professions-ChatIcon-Quality-Tier5:17:17::1|a]|h|r"
 	gotMessage, newCPos = Misspelled:RemoveHighlighting(testMessage, string_len(testMessage))
@@ -951,10 +952,10 @@ function Misspelled:TestRemoveHighlighting()
 	}
 
 	if gotMessage == wantedMessage then testResult = "passed" else testResult = "failed" end
-	Misspelled:AddToInspector(testResults_table,"Test ".. testResult .. ": RemoveHighlighting "..testID)
+	Misspelled:AddToInspector(testResults_table,"Test ".. testResult .. ": RemoveHighlighting "..testId)
 	
 	--Test7 - Correctly spelled word [Hex colored Item link] incorrectly spelled word.
-	testID = "7"
+	testId = "7"
 	testMessage = "Off-hand: |cffa335ee|Hitem:222566::::::::80:258::13:1:3524:6:40:2249:38:8:45:211296:46:226024:47:222584:48:224072:::::|h[Vagabond's Torch |A:Professions-ChatIcon-Quality-Tier5:17:17::1|a]|h|r |cff7dc6fbbadd|r."
 	wantedMessage= "Off-hand: |cffa335ee|Hitem:222566::::::::80:258::13:1:3524:6:40:2249:38:8:45:211296:46:226024:47:222584:48:224072:::::|h[Vagabond's Torch |A:Professions-ChatIcon-Quality-Tier5:17:17::1|a]|h|r badd."
 	gotMessage, newCPos = Misspelled:RemoveHighlighting(testMessage, string_len(testMessage))
@@ -968,10 +969,10 @@ function Misspelled:TestRemoveHighlighting()
 	}
 
 	if gotMessage == wantedMessage then testResult = "passed" else testResult = "failed" end
-	Misspelled:AddToInspector(testResults_table,"Test ".. testResult .. ": RemoveHighlighting "..testID)
+	Misspelled:AddToInspector(testResults_table,"Test ".. testResult .. ": RemoveHighlighting "..testId)
 
 	--Test8 - Correctly spelled word [cnIQ#: colored Item link]
-	testID = "8"
+	testId = "8"
 	testMessage  = "test: |cnIQ2:|Hitem:225566::::::::80:258:::::::::|h[Warped Wing]|h|r"
 	wantedMessage = "test: |cnIQ2:|Hitem:225566::::::::80:258:::::::::|h[Warped Wing]|h|r"
 	gotMessage, newCPos = Misspelled:RemoveHighlighting(testMessage, string_len(testMessage))
@@ -985,10 +986,10 @@ function Misspelled:TestRemoveHighlighting()
 	}
 
 	if gotMessage == wantedMessage then testResult = "passed" else testResult = "failed" end
-	Misspelled:AddToInspector(testResults_table,"Test ".. testResult .. ": RemoveHighlighting "..testID)
+	Misspelled:AddToInspector(testResults_table,"Test ".. testResult .. ": RemoveHighlighting "..testId)
 
 	--Test9 - Correctly spelled word [cnIQ#: colored Item link] incorrectly spelled word.
-	testID = "9"
+	testId = "9"
 	testMessage  = "test: |cnIQ2:|Hitem:225566::::::::80:258:::::::::|h[Warped Wing]|h|r |cff7dc6fbbadd|r."
 	wantedMessage = "test: |cnIQ2:|Hitem:225566::::::::80:258:::::::::|h[Warped Wing]|h|r badd."
 	gotMessage, newCPos = Misspelled:RemoveHighlighting(testMessage, string_len(testMessage))
@@ -1002,7 +1003,7 @@ function Misspelled:TestRemoveHighlighting()
 	}
 
 	if gotMessage == wantedMessage then testResult = "passed" else testResult = "failed" end
-	Misspelled:AddToInspector(testResults_table,"Test ".. testResult .. ": RemoveHighlighting "..testID)
+	Misspelled:AddToInspector(testResults_table,"Test ".. testResult .. ": RemoveHighlighting "..testId)
 end
 
 -------------------------------------------------------------------------
@@ -1058,76 +1059,89 @@ function MisspelledSuggestions_InitializeDropDown(level)
 	if RightClickedWord == nil then return end
 	if #RightClickedWord == 0 then return end
 
-	info = UIDropDownMenu_CreateInfo()
-	info.text = L["Suggestions for:"] .. " " .. RightClickedWord
-	info.isTitle = 1
-	info.notClickable = 1
-	info.notCheckable = true
-	UIDropDownMenu_AddButton(info)
+	do
+	  local info = UIDropDownMenu_CreateInfo()
+	  info.text = L["Suggestions for:"] .. " " .. RightClickedWord
+	  info.isTitle = 1
+	  info.notClickable = 1
+	  info.notCheckable = true
+	  UIDropDownMenu_AddButton(info)
+	end
 
+	--Add suggestions to the DropDown
 	for i, s in ipairs(WordCache[RightClickedWord].Suggestions) do
-		info = UIDropDownMenu_CreateInfo()
-                --Line below causes a this == nil error in 4.0.  Looks like it's not needed.
-		--info.owner = this:GetParent()
+		do
+			local info = UIDropDownMenu_CreateInfo()
+            --Line below causes a this == nil error in 4.0.  Looks like it's not needed.
+			--info.owner = this:GetParent()
 
-		--If the misspelled word's first
-		info.text = s.Word
+			--If the misspelled word's first
+			info.text = s.Word
 
-		--If this suggestion is either a guild member or friend append a note.
-		if Misspelled:IsGuildMember(s.Word) == true then
-			info.text = info.text .. " " .. L["(Guild)"]
-		else
-			if Misspelled:IsFriend(s.Word) == true then
-				info.text = info.text .. " " .. L["(Friend)"]
+			--If this suggestion is either a guild member or friend append a note.
+			if Misspelled:IsGuildMember(s.Word) == true then
+				info.text = info.text .. " " .. L["(Guild)"]
+			else
+				if Misspelled:IsFriend(s.Word) == true then
+					info.text = info.text .. " " .. L["(Friend)"]
+				end
 			end
-		end
 
+			info.isTitle = nil
+			info.notCheckable = true
+			info.value = s.Word
+			info.func = function() SuggestionsFrame_Click(s.Word, RightClickedEditBox) end
+			--Add the above info to the options menu as clickable item
+			UIDropDownMenu_AddButton(info)
+		end
+	end
+
+	do
+		--Add a non-clickable separator
+		local info = UIDropDownMenu_CreateInfo()
+		--info.owner = this:GetParent()
+		info.text = ""
 		info.isTitle = nil
+		info.value = ""
+		info.notClickable = 1
 		info.notCheckable = true
-		info.value = s.Word
-		info.func = function() SuggestionsFrame_Click(s.Word, RightClickedEditBox) end
-		--Add the above info to the options menu as clickable item
 		UIDropDownMenu_AddButton(info)
 	end
 
-	--Add a non clickable separator
-	info = UIDropDownMenu_CreateInfo()
-	--info.owner = this:GetParent()
-	info.text = ""
-	info.isTitle = nil
-	info.value = ""
-	info.notClickable = 1
-	info.notCheckable = true
-	UIDropDownMenu_AddButton(info)
+	do
+		local info = UIDropDownMenu_CreateInfo()
+		--info.owner = this:GetParent()
+		info.text = L["Ignore All"]
+		info.isTitle = nil
+		info.value = RightClickedWord
+		info.func = function() SuggestionsFrame_Click("###IgnoreAll", RightClickedEditBox) end
+		info.notClickable = nil
+		info.notCheckable = true
+		UIDropDownMenu_AddButton(info)
+	end
 
-	info = UIDropDownMenu_CreateInfo()
-	--info.owner = this:GetParent()
-	info.text = L["Ignore All"]
-	info.isTitle = nil
-	info.value = RightClickedWord
-	info.func = function() SuggestionsFrame_Click("###IgnoreAll", RightClickedEditBox) end
-	info.notClickable = nil
-	info.notCheckable = true
-	UIDropDownMenu_AddButton(info)
+	do
+		local info = UIDropDownMenu_CreateInfo()
+		--info.owner = this:GetParent()
+		info.text = L["Add to Dictionary"]
+		info.isTitle = nil
+		info.value = RightClickedWord
+		info.func = function() SuggestionsFrame_Click("###AddToDictionary", RightClickedEditBox) end
+		info.notClickable = nil
+		info.notCheckable = true
+		UIDropDownMenu_AddButton(info)
+	end
 
-	info = UIDropDownMenu_CreateInfo()
-	--info.owner = this:GetParent()
-	info.text = L["Add to Dictionary"]
-	info.isTitle = nil
-	info.value = RightClickedWord
-	info.func = function() SuggestionsFrame_Click("###AddToDictionary", RightClickedEditBox) end
-	info.notClickable = nil
-	info.notCheckable = true
-	UIDropDownMenu_AddButton(info)
-
-	info = UIDropDownMenu_CreateInfo()
-	--info.owner = this:GetParent()
-	info.text = L["Cancel"]
-	info.isTitle = nil
-	info.value = nil
-	info.notClickable = nil
-	info.notCheckable = true
-	UIDropDownMenu_AddButton(info)
+	do
+		local info = UIDropDownMenu_CreateInfo()
+		--info.owner = this:GetParent()
+		info.text = L["Cancel"]
+		info.isTitle = nil
+		info.value = nil
+		info.notClickable = nil
+		info.notCheckable = true
+		UIDropDownMenu_AddButton(info)
+	end
 end
 
 function MisspelledSuggestions_DropDownOnLoad(self)
@@ -1141,9 +1155,12 @@ function SuggestionsFrame_Click(value, editbox)
 	--print("Suggestion Clicked: ", value)
 
 	local newText = editbox:GetText()
-	local newCurcorPos = nil
+	local newCursorPos = nil
 
 	local isCapitalizedRightClickedWord = false
+
+	--Check if the local (global) var RightClickedWord is populated with a non nil value
+    assert(RightClickedWord ~= nil, "Misspelled: SuggestionsFrame_Click, Unexpected: RightClickedWord == nil")
 
 	if string_sub(RightClickedWord, 1, 1) == string_upper(string_sub(RightClickedWord, 1, 1)) then
 		isCapitalizedRightClickedWord = true
@@ -1188,7 +1205,7 @@ function SuggestionsFrame_Click(value, editbox)
 
 	editbox:SetText(newText)
 
-	--printable = gsub(newText, "\124", "\124\124")
+	--printable = gsub(newText, "\124", "\124\124")  --\124 == "|"
     --print("New ChatText:", printable)
 
 	--If we replaced a word, with a suggestion, move the cursor to the end of the new word.
@@ -1219,7 +1236,7 @@ end
 
 --Load the words saved in the Users dictionary into the baseWords table.
 --In r18 we changed the in memory format used to store the baseWords, affixCode and PhoneticCode,
---Saved a ton of memory not using a sub-table per paseword.
+--Saved a ton of memory not using a sub-table per baseWord.
 --If necessary convert the user dictionary storage to match the newer format.
 function Misspelled:LoadUserDict()
 	if Misspelled_DB == nil then
@@ -1391,30 +1408,30 @@ end
 --loaded dictionary.
 function Misspelled:LoadGuildAndFriendRoster()
 
-	local numFriends, name
+	local numFriends, f --FriendInfo (https://warcraft.wiki.gg/wiki/API_C_FriendList.GetFriendInfo)
 	local pcode
 
-	--print("Misspelled: Guild Members Loading...")
+	--print("Misspelled: Friends names and guild members loading...")
 
 	--First check your friends list
-	if GetNumFriends ~= nil then
-		numFriends = GetNumFriends()
+	if C_FriendList.GetNumFriends ~= nil then
+		numFriends = C_FriendList.GetNumFriends()
 		if numFriends > 0 then
 			for i = 1, numFriends do
-				name = GetFriendInfo(i)
-				if name ~= nil then
-					if #name > 0 then
-						if WordDict:Contains(name) == false then
+				f = C_FriendList.GetFriendInfoByIndex(i)
+				if f ~= nil then
+					if #f.name > 0 then
+						if WordDict:Contains(f.name) == false then
 							--Look up the phonetic code for this friend name
 							if WordDict.soundslike == WordDict.Const.SoundslikeAlgorithms.PHONETIC then
-								pcode = WordDict:PhoneticCode(name)
+								pcode = WordDict:PhoneticCode(f.name)
 							elseif WordDict.soundslike == WordDict.Const.SoundslikeAlgorithms.GENERIC then
-								pcode = WordDict:GenericSoundsLike(name)
+								pcode = WordDict:GenericSoundsLike(f.name)
 							else
 								pcode = ""
 							end
 							--Add the friend name to the loaded dictionary
-							WordDict.baseWords[name] = "/" .. pcode
+							WordDict.baseWords[f.name] = "/" .. pcode
 						end
 					end
 				end
@@ -1423,24 +1440,25 @@ function Misspelled:LoadGuildAndFriendRoster()
 	end
 
 	-- Guild members are valid words.
-	if GetNumGuildMembers(true) ~= 0 then
-		numFriends = GetNumGuildMembers(true)	-- true to include offline members
-		if ( numFriends > 0 ) then
-			for i=1, numFriends do
-				name = GetGuildRosterInfo(i);
-				if name ~= nil then
-					if #name ~= 0 then
-						if WordDict:Contains(name) == false then
+	local numTotalInGuild, guildMemberName
+	if GetNumGuildMembers() ~= 0 then
+		numTotalInGuild = GetNumGuildMembers()
+		if ( numTotalInGuild > 0 ) then
+			for i=1, numTotalInGuild do
+				guildMemberName = GetGuildRosterInfo(i);
+				if guildMemberName ~= nil then
+					if #guildMemberName ~= 0 then
+						if WordDict:Contains(guildMemberName) == false then
 							--Look up the phonetic code for this guild member name
 							if WordDict.soundslike == WordDict.Const.SoundslikeAlgorithms.PHONETIC then
-								pcode = WordDict:PhoneticCode(name)
+								pcode = WordDict:PhoneticCode(guildMemberName)
 							elseif WordDict.soundslike == WordDict.Const.SoundslikeAlgorithms.GENERIC then
-								pcode = WordDict:GenericSoundsLike(name)
+								pcode = WordDict:GenericSoundsLike(guildMemberName)
 							else
 								pcode = ""
 							end
 							--Add the guild member to the loaded dictionary
-							WordDict.baseWords[name] = "/" .. pcode
+							WordDict.baseWords[guildMemberName] = "/" .. pcode
 						end
 					end
 				end
@@ -1713,12 +1731,13 @@ end
 
 --Split a string, at patt delimiter, into a table
 function Misspelled:split(str, patt)
-	vals = {}; valindex = 0; word = ""
+	local vals = {}
+	local valindex = 0
+	local word = ""
 	-- need to add a trailing separator to catch the last value.
 	str = str .. patt
 	for i = 1, string_len(str) do
-
-		cha = string_sub(str, i, i)
+		local cha = string_sub(str, i, i)
 		if cha ~= patt then
 			word = word .. cha
 		else
@@ -1774,11 +1793,11 @@ end
 function Misspelled:IsFriend(name)
 	local numFriends
 
-	if GetNumFriends ~= nil then
-		numFriends = GetNumFriends()
+	if C_FriendList.GetNumFriends ~= nil then
+		numFriends = C_FriendList.GetNumFriends()
 		if numFriends > 0 then
 			for i = 1, numFriends do
-				if name == GetFriendInfo(i) then
+				if name == C_FriendList.GetFriendInfoByIndex(i) then
 					return true
 				end
 			end
