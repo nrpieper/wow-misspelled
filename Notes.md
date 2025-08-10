@@ -14,6 +14,13 @@ Wow includes two utf8 string meathods used in chat boxes: (https://warcraft.wiki
 strcmputf8i(string,string) - string comparison accounting for UTF-8 chars
 strlenutf8(string) - returns the number of characters in a UTF8-encoded string.
 
+LUA UTF8 to Unicode code point and back
+https://web.archive.org/web/20120826142853/http://developer.coronalabs.com/code/utf-8-conversion-utility
+
+
+editbox.GetUTF8CursorPosition()
+SetCursorPosition - needs to be tested to see if it utf8 aware
+
 **Fixed - Issue: Wow 11 - War Within, issue loading interface options (Misspellec.lua: 1417 disabled for now)
 Looking to convert addon options to use AceConfig.
 ref: Patch 11 settings API changes: https://warcraft.wiki.gg/wiki/Patch_11.0.2/API_changes#Settings_API_changes
