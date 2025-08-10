@@ -62,7 +62,71 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 -- UTF8-tail   = %x80-BF
 --
 
--- returns the number of bytes used by the UTF-8 character at byte i in s
+--UTF-8 Binary format of bytes in sequence:
+--
+--  1st Byte  2nd Byte  3rd Byte  4th Byte  Number of Free Bits  Maximum Expressible Unicode Value
+--  0xxxxxxx                                          07         007F hex (127)
+--  110xxxxx  10xxxxxx                          (5+6)=11         07FF hex (2047)
+--  1110xxxx  10xxxxxx  10xxxxxx              (4+6+6)=16         FFFF hex (65535)
+--  11110xxx  10xxxxxx  10xxxxxx  10xxxxxx  (3+6+6+6)=21         10FFFF hex (1,114,111)
+--
+
+-- The "x" characters in the table above represent the number of "Free Bits", those bits are empty and we can write to them.
+-- The other bits are reserved for the UTF-8 format, they are used as headers / markers. 
+-- Thanks to these headers, when the bytes are being read using the UTF-8 encoding, the computer knows, which bytes to read together and which separately.
+-- The byte size of your character, after being encoded using the UTF-8 format, depends on how many bits you need to store.
+-- In our case the "汉" character is exactly 2 bytes or 16bits: "01101100 01001001"
+-- thus the size of our character after being encoded to UTF-8, 
+-- will be 3 bytes or 24bits: "11100110 10110001 10001001"
+-- because "3 UTF-8 bytes" have 16 Free Bits, which we can write to
+--
+--  A Chinese character:      汉
+-- 	its Unicode value:        U+6C49
+-- 	convert 6C49 to binary:   01101100 01001001
+-- 	encode 6C49 as UTF-8:     11100110 10110001 10001001
+
+local byte 	= string.byte
+local char 	= string.char
+local len	= string.len
+local strcmputf8i = strcmputf8i -- WoW built in function: case-insensative string comparision accounting for UTF-8 chars, returning C style 0, 0<, 0>.
+
+local utf8CodepointByteLenCache = {} -- cache of UTF-8 variable-width byte length of encoded Unicode code point.
+
+-- Use the UTF8 header byte (first most byte) to determine the UFT8 variable-width encoded byte length of the codepoint: one to four
+-- Conditional Logic: The function uses a series of conditional statements to determine the length based on the value of the first byte:
+-- If byte is nil, it returns 0.
+-- If byte is less than 0x80 (128 in decimal), it returns 1, indicating a single-byte UTF-8 character.
+-- If byte is greater than or equal to 0xF0 (240 in decimal), it returns 4, indicating a four-byte UTF-8 character.
+-- If byte is between 0xE0 (224 in decimal) and 0xEF (239 in decimal), it returns 3, indicating a three-byte UTF-8 character.
+-- If byte is between 0xC0 (192 in decimal) and 0xDF (223 in decimal), it returns 2, indicating a two-byte UTF-8 character.
+local function utf8CodepointByteLen(byte)
+  if type(byte) ~= "number" then
+    error("bad argument #1 to 'utf8CodepointByteLen' (number expected, got ".. type(byte).. ")")
+  end
+
+  return not byte and 0 or (byte < 0x80 and 1) or (byte >= 0xF0 and 4) or (byte >= 0xE0 and 3) or (byte >= 0xC0 and 2) or 1
+end
+
+-- Populate the cache utf8codepointlenCache with 256 values to indicate the UTF-8 sequence byte length 
+-- for a given UTF-8 encoding beginning with the given URF-8 header byte value at the array index
+for i = 0, 255 do
+	utf8CodepointByteLenCache[i] = utf8CodepointByteLen(i)
+end
+
+-- Return the number of bytes used to encode a UTF-8 character at byte pos in string str.
+local function utf8CharByteLen(str, bytePos)
+	-- lookup UTF-8 encoded character byte length from cache
+  return utf8CodepointByteLen[byte(str, bytePos) or 256]
+end
+
+-- Given string: str as an array of bytes, return the byte postition of the next UTF-8 character in the string,
+-- after the UTF-8 encoeed character at byte postiion: pos.
+local function utf8NextCharPosition(str, bytePos)
+  return bytePos + utf8CharByteLen(str, bytePos)
+end
+
+
+-- returns the number of bytes used by the UTF-8 character at byte i in string s
 -- also doubles as a UTF-8 character validator
 local function utf8charbytes (s, i)
 	-- argument defaults
@@ -169,14 +233,12 @@ local function utf8len (s)
  	end
 
 	local pos = 1
-	local bytes = s:len()
+	local bytes = len(s)
 	local len = 0
 
 	while pos <= bytes do
-		--local c = s:byte(pos)
 		len = len + 1
-
-		pos = pos + utf8charbytes(s, pos)
+		pos = pos + utf8CharByteLen(s, pos)
 	end
 
 	return len
@@ -184,7 +246,16 @@ end
 
 -- install in the string library
 if not string.utf8len then
-	string.utf8len = utf8len
+	if strlenutf8 then  -- WoW supplied UTF8 string length function (20x faster)
+		string.utf8len = strlenutf8
+	else
+		string.utf8len = utf8len
+	end
+end
+
+-- Expose the urf8len function here for performance comparison testing with strlenutf8 in WoW
+if not string.utf8lenold then
+	string.utf8lenold = utf8len
 end
 
 -- returns a 32bit integer representation of the UTF-8 character
