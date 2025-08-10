@@ -116,7 +116,7 @@ end
 -- Return the number of bytes used to encode a UTF-8 character at byte pos in string str.
 local function utf8CharByteLen(str, bytePos)
 	-- lookup UTF-8 encoded character byte length from cache
-  return utf8CodepointByteLen[byte(str, bytePos) or 256]
+  return utf8CodepointByteLenCache[byte(str, bytePos) or 256]
 end
 
 -- Given string: str as an array of bytes, return the byte postition of the next UTF-8 character in the string,
