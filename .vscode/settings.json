@@ -1,0 +1,32 @@
+{
+    "Lua.diagnostics.globals": [
+        "UIDropDownMenu_Initialize",
+        "UIDropDownMenu_AddButton",
+        "Settings",
+        "SELECTED_DOCK_FRAME",
+        "ChatEdit_ActivateChat",
+        "WOW_PROJECT_ID",
+        "CloseDropDownMenus",
+        "UIDropDownMenu_CreateInfo",
+        "UIParent",
+        "WOW_PROJECT_MAINLINE",
+        "FONT_COLOR_CODE_CLOSE",
+        "ToggleDropDownMenu",
+        "ChatFrame1EditBox"
+    ],
+    "Lua.runtime.version": "Lua 5.1",
+    "Lua.runtime.builtin": {
+        "basic": "disable",
+        "debug": "disable",
+        "io": "disable",
+        "math": "disable",
+        "os": "disable",
+        "package": "disable",
+        "string": "disable",
+        "table": "disable",
+        "utf8": "disable"
+    },
+    "Lua.workspace.library": [
+        "~\\.vscode\\extensions\\ketho.wow-api-0.20.8\\Annotations\\Core"
+    ]
+}
