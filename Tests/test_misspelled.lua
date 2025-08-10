@@ -4,6 +4,24 @@ end
 
 Misspelled.Tests.Misspelled = {}
 
+-- Tests for Chat EditBox cursor positioning to confirm assumptions for UTF8 
+function Misspelled.Tests.Misspelled:ChatEditCursorPosition()
+	local editbox = ChatFrame1EditBox
+	ChatFrame1EditBox:SetText("")
+	assert(editbox:GetCursorPosition() == 0)
+	assert(editbox:GetUTF8CursorPosition() == 0)
+	
+	--Non-UTF8 text
+	editbox:SetText("Applez.")
+	assert(editbox:GetCursorPosition() == 7)
+	assert(editbox:GetUTF8CursorPosition() == 7)
+
+	--UFT8 text
+	editbox:SetText("áéí.")
+	assert(editbox:GetCursorPosition() == 7)
+	assert(editbox:GetUTF8CursorPosition() == 4)
+end
+
 -- Tests for Misspelled:TestRemoveHighlighting
 function Misspelled.Tests.Misspelled:TestRemoveHighlighting()
 	local string_gsub = string.gsub
@@ -66,7 +84,8 @@ function Misspelled.Tests.Misspelled:TestRemoveHighlighting()
 end
 
 function Misspelled.Tests.Misspelled:RunTests()
-    Misspelled.Tests.Misspelled:TestRemoveHighlighting()
+    Misspelled.Tests.Misspelled:ChatEditCursorPosition()
+	Misspelled.Tests.Misspelled:TestRemoveHighlighting()
 end
 
 
