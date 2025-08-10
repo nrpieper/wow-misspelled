@@ -870,6 +870,7 @@ function Misspelled:RemoveHighlighting(text, ...)
 end
 
 function Misspelled:TestRemoveHighlighting()
+	local testId
 	local testMessage
 	local wantedMessage
 	local gotMessage
@@ -877,7 +878,7 @@ function Misspelled:TestRemoveHighlighting()
 	local testResult
 
 	--Test 1
-	testID = "1"
+	testId = "1"
 	testMessage = "Apple"
 	wantedMessage= "Apple"
 	gotMessage, newCPos = Misspelled:RemoveHighlighting(testMessage, string_len(testMessage))
@@ -891,10 +892,10 @@ function Misspelled:TestRemoveHighlighting()
 	}
 
 	if gotMessage == wantedMessage then testResult = "passed" else testResult = "failed" end
-    Misspelled:AddToInspector(testResults_table,"Test ".. testResult .. ": RemoveHighlighting "..testID)
+    Misspelled:AddToInspector(testResults_table,"Test ".. testResult .. ": RemoveHighlighting "..testId)
 	
 	--Test2 - Misspelled highlighted word: Applez
-	testID = "2"
+	testId = "2"
 	testMessage = "|cff7dc6fbApplez|r"
 	wantedMessage= "Applez"
 	gotMessage, newCPos = Misspelled:RemoveHighlighting(testMessage, string_len(testMessage))
@@ -908,10 +909,10 @@ function Misspelled:TestRemoveHighlighting()
 	}
 
 	if gotMessage == wantedMessage then testResult = "passed" else testResult = "failed" end
-    Misspelled:AddToInspector(testResults_table,"Test ".. testResult .. ": RemoveHighlighting "..testID)
+    Misspelled:AddToInspector(testResults_table,"Test ".. testResult .. ": RemoveHighlighting "..testId)
 	
 	--Test3 - Misspelled highlighted word: Applez good.
-	testID = "3"
+	testId = "3"
 	testMessage = "|cff7dc6fbApplez|r good."
 	wantedMessage= "Applez good."
 	gotMessage, newCPos = Misspelled:RemoveHighlighting(testMessage, string_len(testMessage))
@@ -925,10 +926,10 @@ function Misspelled:TestRemoveHighlighting()
 	}
 
 	if gotMessage == wantedMessage then testResult = "passed" else testResult = "failed" end
-    Misspelled:AddToInspector(testResults_table,"Test ".. testResult .. ": RemoveHighlighting "..testID)
+    Misspelled:AddToInspector(testResults_table,"Test ".. testResult .. ": RemoveHighlighting "..testId)
 
 	--Test4 - Correctly spelled word [Link] correctly spelled word
-	testID = "4"
+	testId = "4"
 	testMessage = "Test |cff71d5ff|Hspell:2061:0|h[Flash Heal]|h|r good."
 	wantedMessage= "Test |cff71d5ff|Hspell:2061:0|h[Flash Heal]|h|r good."
 	gotMessage, newCPos = Misspelled:RemoveHighlighting(testMessage, string_len(testMessage))
@@ -942,10 +943,10 @@ function Misspelled:TestRemoveHighlighting()
 	}
 
 	if gotMessage == wantedMessage then testResult = "passed" else testResult = "failed" end
-	Misspelled:AddToInspector(testResults_table,"Test ".. testResult .. ": RemoveHighlighting "..testID)
+	Misspelled:AddToInspector(testResults_table,"Test ".. testResult .. ": RemoveHighlighting "..testId)
 
 	--Test5 - Correctly spelled word [Spell Link] incorrectly spelled word
-	testID = "5"
+	testId = "5"
 	testMessage = "Test |cff71d5ff|Hspell:2061:0|h[Flash Heal]|h|r |cff7dc6fbbadd|r."
 	wantedMessage= "Test |cff71d5ff|Hspell:2061:0|h[Flash Heal]|h|r badd."
 	gotMessage, newCPos = Misspelled:RemoveHighlighting(testMessage, string_len(testMessage))
@@ -959,10 +960,10 @@ function Misspelled:TestRemoveHighlighting()
 	}
 
 	if gotMessage == wantedMessage then testResult = "passed" else testResult = "failed" end
-	Misspelled:AddToInspector(testResults_table,"Test ".. testResult .. ": RemoveHighlighting "..testID)
+	Misspelled:AddToInspector(testResults_table,"Test ".. testResult .. ": RemoveHighlighting "..testId)
 
 	--Test6 - Correctly spelled word [Item link]
-	testID = "6"
+	testId = "6"
 	testMessage = "Off-hand: |cffa335ee|Hitem:222566::::::::80:258::13:1:3524:6:40:2249:38:8:45:211296:46:226024:47:222584:48:224072:::::|h[Vagabond's Torch |A:Professions-ChatIcon-Quality-Tier5:17:17::1|a]|h|r"
 	wantedMessage= "Off-hand: |cffa335ee|Hitem:222566::::::::80:258::13:1:3524:6:40:2249:38:8:45:211296:46:226024:47:222584:48:224072:::::|h[Vagabond's Torch |A:Professions-ChatIcon-Quality-Tier5:17:17::1|a]|h|r"
 	gotMessage, newCPos = Misspelled:RemoveHighlighting(testMessage, string_len(testMessage))
@@ -976,10 +977,10 @@ function Misspelled:TestRemoveHighlighting()
 	}
 
 	if gotMessage == wantedMessage then testResult = "passed" else testResult = "failed" end
-	Misspelled:AddToInspector(testResults_table,"Test ".. testResult .. ": RemoveHighlighting "..testID)
+	Misspelled:AddToInspector(testResults_table,"Test ".. testResult .. ": RemoveHighlighting "..testId)
 	
 	--Test7 - Correctly spelled word [Hex colored Item link] incorrectly spelled word.
-	testID = "7"
+	testId = "7"
 	testMessage = "Off-hand: |cffa335ee|Hitem:222566::::::::80:258::13:1:3524:6:40:2249:38:8:45:211296:46:226024:47:222584:48:224072:::::|h[Vagabond's Torch |A:Professions-ChatIcon-Quality-Tier5:17:17::1|a]|h|r |cff7dc6fbbadd|r."
 	wantedMessage= "Off-hand: |cffa335ee|Hitem:222566::::::::80:258::13:1:3524:6:40:2249:38:8:45:211296:46:226024:47:222584:48:224072:::::|h[Vagabond's Torch |A:Professions-ChatIcon-Quality-Tier5:17:17::1|a]|h|r badd."
 	gotMessage, newCPos = Misspelled:RemoveHighlighting(testMessage, string_len(testMessage))
@@ -993,10 +994,10 @@ function Misspelled:TestRemoveHighlighting()
 	}
 
 	if gotMessage == wantedMessage then testResult = "passed" else testResult = "failed" end
-	Misspelled:AddToInspector(testResults_table,"Test ".. testResult .. ": RemoveHighlighting "..testID)
+	Misspelled:AddToInspector(testResults_table,"Test ".. testResult .. ": RemoveHighlighting "..testId)
 
 	--Test8 - Correctly spelled word [cnIQ#: colored Item link]
-	testID = "8"
+	testId = "8"
 	testMessage  = "test: |cnIQ2:|Hitem:225566::::::::80:258:::::::::|h[Warped Wing]|h|r"
 	wantedMessage = "test: |cnIQ2:|Hitem:225566::::::::80:258:::::::::|h[Warped Wing]|h|r"
 	gotMessage, newCPos = Misspelled:RemoveHighlighting(testMessage, string_len(testMessage))
@@ -1010,10 +1011,10 @@ function Misspelled:TestRemoveHighlighting()
 	}
 
 	if gotMessage == wantedMessage then testResult = "passed" else testResult = "failed" end
-	Misspelled:AddToInspector(testResults_table,"Test ".. testResult .. ": RemoveHighlighting "..testID)
+	Misspelled:AddToInspector(testResults_table,"Test ".. testResult .. ": RemoveHighlighting "..testId)
 
 	--Test9 - Correctly spelled word [cnIQ#: colored Item link] incorrectly spelled word.
-	testID = "9"
+	testId = "9"
 	testMessage  = "test: |cnIQ2:|Hitem:225566::::::::80:258:::::::::|h[Warped Wing]|h|r |cff7dc6fbbadd|r."
 	wantedMessage = "test: |cnIQ2:|Hitem:225566::::::::80:258:::::::::|h[Warped Wing]|h|r badd."
 	gotMessage, newCPos = Misspelled:RemoveHighlighting(testMessage, string_len(testMessage))
@@ -1027,7 +1028,7 @@ function Misspelled:TestRemoveHighlighting()
 	}
 
 	if gotMessage == wantedMessage then testResult = "passed" else testResult = "failed" end
-	Misspelled:AddToInspector(testResults_table,"Test ".. testResult .. ": RemoveHighlighting "..testID)
+	Misspelled:AddToInspector(testResults_table,"Test ".. testResult .. ": RemoveHighlighting "..testId)
 end
 
 -------------------------------------------------------------------------
@@ -1085,86 +1086,86 @@ function MisspelledSuggestions_InitializeDropDown(level)
 
 	do
 	  local info = UIDropDownMenu_CreateInfo()
-	info.text = L["Suggestions for:"] .. " " .. RightClickedWord
-	info.isTitle = 1
-	info.notClickable = 1
-	info.notCheckable = true
-	UIDropDownMenu_AddButton(info)
+	  info.text = L["Suggestions for:"] .. " " .. RightClickedWord
+	  info.isTitle = 1
+	  info.notClickable = 1
+	  info.notCheckable = true
+	  UIDropDownMenu_AddButton(info)
 	end
 
 	--Add suggestions to the DropDown
 	for i, s in ipairs(WordCache[RightClickedWord].Suggestions) do
 		do
 			local info = UIDropDownMenu_CreateInfo()
-                --Line below causes a this == nil error in 4.0.  Looks like it's not needed.
-		--info.owner = this:GetParent()
+            --Line below causes a this == nil error in 4.0.  Looks like it's not needed.
+			--info.owner = this:GetParent()
 
-		--If the misspelled word's first
-		info.text = s.Word
+			--If the misspelled word's first
+			info.text = s.Word
 
-		--If this suggestion is either a guild member or friend append a note.
-		if Misspelled:IsGuildMember(s.Word) == true then
-			info.text = info.text .. " " .. L["(Guild)"]
-		else
-			if Misspelled:IsFriend(s.Word) == true then
-				info.text = info.text .. " " .. L["(Friend)"]
+			--If this suggestion is either a guild member or friend append a note.
+			if Misspelled:IsGuildMember(s.Word) == true then
+				info.text = info.text .. " " .. L["(Guild)"]
+			else
+				if Misspelled:IsFriend(s.Word) == true then
+					info.text = info.text .. " " .. L["(Friend)"]
+				end
 			end
-		end
 
-		info.isTitle = nil
-		info.notCheckable = true
-		info.value = s.Word
-		info.func = function() SuggestionsFrame_Click(s.Word, RightClickedEditBox) end
-		--Add the above info to the options menu as clickable item
-		UIDropDownMenu_AddButton(info)
+			info.isTitle = nil
+			info.notCheckable = true
+			info.value = s.Word
+			info.func = function() SuggestionsFrame_Click(s.Word, RightClickedEditBox) end
+			--Add the above info to the options menu as clickable item
+			UIDropDownMenu_AddButton(info)
 		end
 	end
 
 	do
 		--Add a non-clickable separator
 		local info = UIDropDownMenu_CreateInfo()
-	--info.owner = this:GetParent()
-	info.text = ""
-	info.isTitle = nil
-	info.value = ""
-	info.notClickable = 1
-	info.notCheckable = true
-	UIDropDownMenu_AddButton(info)
+		--info.owner = this:GetParent()
+		info.text = ""
+		info.isTitle = nil
+		info.value = ""
+		info.notClickable = 1
+		info.notCheckable = true
+		UIDropDownMenu_AddButton(info)
 	end
 
 	do
 		local info = UIDropDownMenu_CreateInfo()
-	--info.owner = this:GetParent()
-	info.text = L["Ignore All"]
-	info.isTitle = nil
-	info.value = RightClickedWord
-	info.func = function() SuggestionsFrame_Click("###IgnoreAll", RightClickedEditBox) end
-	info.notClickable = nil
-	info.notCheckable = true
-	UIDropDownMenu_AddButton(info)
+		--info.owner = this:GetParent()
+		info.text = L["Ignore All"]
+		info.isTitle = nil
+		info.value = RightClickedWord
+		info.func = function() SuggestionsFrame_Click("###IgnoreAll", RightClickedEditBox) end
+		info.notClickable = nil
+		info.notCheckable = true
+		UIDropDownMenu_AddButton(info)
 	end
 
 	do
 		local info = UIDropDownMenu_CreateInfo()
-	--info.owner = this:GetParent()
-	info.text = L["Add to Dictionary"]
-	info.isTitle = nil
-	info.value = RightClickedWord
-	info.func = function() SuggestionsFrame_Click("###AddToDictionary", RightClickedEditBox) end
-	info.notClickable = nil
-	info.notCheckable = true
-	UIDropDownMenu_AddButton(info)
+		--info.owner = this:GetParent()
+		info.text = L["Add to Dictionary"]
+		info.isTitle = nil
+		info.value = RightClickedWord
+		info.func = function() SuggestionsFrame_Click("###AddToDictionary", RightClickedEditBox) end
+		info.notClickable = nil
+		info.notCheckable = true
+		UIDropDownMenu_AddButton(info)
 	end
 
 	do
 		local info = UIDropDownMenu_CreateInfo()
-	--info.owner = this:GetParent()
-	info.text = L["Cancel"]
-	info.isTitle = nil
-	info.value = nil
-	info.notClickable = nil
-	info.notCheckable = true
-	UIDropDownMenu_AddButton(info)
+		--info.owner = this:GetParent()
+		info.text = L["Cancel"]
+		info.isTitle = nil
+		info.value = nil
+		info.notClickable = nil
+		info.notCheckable = true
+		UIDropDownMenu_AddButton(info)
 	end
 end
 
