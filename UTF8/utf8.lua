@@ -16,7 +16,7 @@
 --
 -- Added by Nathan Pieper
 -- * string.utf8charToInt(c)
--- * string.utf8byte(s, i, ...)  -Pourly named.  returns (4 byte) 32bit number
+-- * string.utf8byte(s, i, ...)  -Poorly named.  returns (4 byte) 32bit number
 --
 -- All functions behave as their non UTF-8 aware counterparts with the exception
 -- that UTF-8 characters are used instead of bytes for all units.
@@ -69,12 +69,12 @@ local function utf8charbytes (s, i)
 	i = i or 1
 
 	-- argument checking
---~ 	if type(s) ~= "string" then
---~ 		error("bad argument #1 to 'utf8charbytes' (string expected, got ".. type(s).. ")")
---~ 	end
---~ 	if type(i) ~= "number" then
---~ 		error("bad argument #2 to 'utf8charbytes' (number expected, got ".. type(i).. ")")
---~ 	end
+ 	if type(s) ~= "string" then
+ 		error("bad argument #1 to 'utf8charbytes' (string expected, got ".. type(s).. ")")
+ 	end
+ 	if type(i) ~= "number" then
+ 		error("bad argument #2 to 'utf8charbytes' (number expected, got ".. type(i).. ")")
+ 	end
 
 	local c = s:byte(i)
 
@@ -163,10 +163,11 @@ end
 
 -- returns the number of characters in a UTF-8 string
 local function utf8len (s)
---~ 	-- argument checking
---~ 	if type(s) ~= "string" then
---~ 		error("bad argument #1 to 'utf8len' (string expected, got ".. type(s).. ")")
---~ 	end
+ 	-- argument checking
+ 	if type(s) ~= "string" then
+ 		error("bad argument #1 to 'utf8len' (string expected, got ".. type(s).. ")")
+ 	end
+
 	local pos = 1
 	local bytes = s:len()
 	local len = 0
@@ -178,10 +179,6 @@ local function utf8len (s)
 		pos = pos + utf8charbytes(s, pos)
 	end
 
-	--if chars ~= nil then
-	--	return pos - 1
-	--end
-
 	return len
 end
 
@@ -192,10 +189,10 @@ end
 
 -- returns a 32bit integer representation of the UTF-8 character
 local function utf8charToInt(c)
---~ 	--argument checking
---~ 	if type(c) ~= "string" then
---~ 		error("bad argument #1 to 'utf8chartoInt' (string expected, got ".. type(c).. ")")
---~ 	end
+ 	--argument checking
+ 	if type(c) ~= "string" then
+ 		error("bad argument #1 to 'utf8chartoInt' (string expected, got ".. type(c).. ")")
+ 	end
 
 	local pos = 1
 	local bytes = c:len()
@@ -223,16 +220,16 @@ local function utf8sub (s, i, j)
 	-- argument defaults
 	j = j or -1
 
---~ 	-- argument checking
---~ 	if type(s) ~= "string" then
---~ 		error("bad argument #1 to 'utf8sub' (string expected, got ".. type(s).. ")")
---~ 	end
---~ 	if type(i) ~= "number" then
---~ 		error("bad argument #2 to 'utf8sub' (number expected, got ".. type(i).. ")")
---~ 	end
---~ 	if type(j) ~= "number" then
---~ 		error("bad argument #3 to 'utf8sub' (number expected, got ".. type(j).. ")")
---~ 	end
+ 	-- argument checking
+ 	if type(s) ~= "string" then
+ 		error("bad argument #1 to 'utf8sub' (string expected, got ".. type(s).. ")")
+ 	end
+ 	if type(i) ~= "number" then
+ 		error("bad argument #2 to 'utf8sub' (number expected, got ".. type(i).. ")")
+ 	end
+ 	if type(j) ~= "number" then
+ 		error("bad argument #3 to 'utf8sub' (number expected, got ".. type(j).. ")")
+ 	end
 
 	local pos = 1
 	local bytes = s:len()
@@ -278,10 +275,10 @@ end
 --functions acts like string.byte (s [, i [, j]])
 --function returns the 4byte integer/s for a utf8 char as pos 'i' through 'j' in string 's'
 function utf8byte(s, ...)
---~ 	-- argument checking
---~ 	if type(s) ~= "string" then
---~ 		error("bad argument #1 to 'utf8sub' (string expected, got ".. type(s).. ")")
---~ 	end
+ 	-- argument checking
+ 	if type(s) ~= "string" then
+ 		error("bad argument #1 to 'utf8sub' (string expected, got ".. type(s).. ")")
+ 	end
 
 	local arg = {...}
 	if #arg > 0 then
@@ -305,13 +302,13 @@ end
 
 -- replace UTF-8 characters based on a mapping table
 local function utf8replace (s, mapping)
---~ 	-- argument checking
---~ 	if type(s) ~= "string" then
---~ 		error("bad argument #1 to 'utf8replace' (string expected, got ".. type(s).. ")")
---~ 	end
---~ 	if type(mapping) ~= "table" then
---~ 		error("bad argument #2 to 'utf8replace' (table expected, got ".. type(mapping).. ")")
---~ 	end
+ 	-- argument checking
+ 	if type(s) ~= "string" then
+ 		error("bad argument #1 to 'utf8replace' (string expected, got ".. type(s).. ")")
+ 	end
+ 	if type(mapping) ~= "table" then
+ 		error("bad argument #2 to 'utf8replace' (table expected, got ".. type(mapping).. ")")
+ 	end
 
 	local pos = 1
 	local bytes = s:len()
@@ -355,15 +352,16 @@ end
 
 -- identical to string.reverse except that it supports UTF-8
 local function utf8reverse (s)
---~ 	-- argument checking
---~ 	if type(s) ~= "string" then
---~ 		error("bad argument #1 to 'utf8reverse' (string expected, got ".. type(s).. ")")
---~ 	end
+ 	-- argument checking
+ 	if type(s) ~= "string" then
+ 		error("bad argument #1 to 'utf8reverse' (string expected, got ".. type(s).. ")")
+ 	end
 
 	local bytes = s:len()
 	local pos = bytes
 	local charbytes
 	local newstr = ""
+	local c
 
 	while pos > 0 do
 		c = s:byte(pos)
