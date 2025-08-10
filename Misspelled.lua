@@ -133,7 +133,7 @@ local WordLocations = {}       --Lookup table used by multiple functions to dete
 local SkipOnTextChanged = false -- use to avoid OnTextChanged event firing after spell checking highlights chat text.
 local RightClickedWord = nil   --The current word under the CursorPosition that was right-clicked
 local RightClickedWordStartPos --Where that word starts
-local RightClickedWordEndPos --and where that word ends
+local RightClickedWordEndPos   --and where that word ends
 local RightClickedEditBox      --and what EditBox was right clicked
 local OldLineLength            --Tracks the previous length of the ChatEditBox.text
 local GuildRosterCalled = false
@@ -227,7 +227,18 @@ function Misspelled:OnInitialize()
 
 	-- hooks for removing any misspelled word highlighting in the text before the chat message is sent
 	-- The Wow client will disconnect if you attempt to send a color tags in a chat message.
-	Misspelled:RawHook("SendChatMessage", true)
+	local gameType = "Unknown"
+	if WOW_PROJECT_ID ~= nil then
+		if WOW_PROJECT_ID == WOW_PROJECT_MAINLINE then
+			gameType = "MAINLINE"
+		end
+	end
+
+	if gameType == "MAINLINE" then
+	      Misspelled:RawHook(C_ChatInfo,"SendChatMessage", Misspelled.SendChatMessage, true)
+	else
+          Misspelled:RawHook("SendChatMessage", Misspelled.SendChatMessage, true)
+	end
 end
 
 
@@ -294,13 +305,27 @@ end
 
 --Before a chat message is sent, remove any highlighting that Misspelled might have added.
 --The Wow client will disconnect if you attempt to send Hex code colored text in a chat message.
-function Misspelled:SendChatMessage(message, type, language, channel, ...)
+function Misspelled.SendChatMessage(message, chatType, languageID, target, ...)
 	local cleanedMessage = Misspelled:RemoveHighlighting(message)
 
 	--On DEBUG only
-	Misspelled:AddToInspector(cleanedMessage, "Misspelled:SendChatMessage - cleanedMessage")
+	--Misspelled:AddToInspector(cleanedMessage, "Misspelled:SendChatMessage - gotMessage")
 	
-	self.hooks["SendChatMessage"](cleanedMessage, type, language, channel, ...);
+	--self.hooks[C_ChatInfo]["SendChatMessage"](cleanedMessage, chatType, languageID, target, ...)
+	local gameType = "Unknown"
+
+	if WOW_PROJECT_ID ~= nil then
+		if WOW_PROJECT_ID == WOW_PROJECT_MAINLINE then
+			gameType = "MAINLINE"
+
+		end
+	end
+
+	if gameType == "MAINLINE" then
+		Misspelled.hooks[C_ChatInfo]["SendChatMessage"](cleanedMessage, chatType, languageID, target, ...)
+	else
+        Misspelled.hooks["SendChatMessage"](cleanedMessage, chatType, languageID, target, ...)
+	end
 end
 
 --Possible changes:
@@ -323,7 +348,7 @@ function Misspelled.EditBox_OnTextChanged(editbox)
 	--Load the guild roster if needed
 	if GuildRosterCalled == false then
 		if IsInGuild() == 1 then
-			GuildRoster()
+			C_GuildInfo.GuildRoster() --Request updated guid roseter info from the server
 		else
 			Misspelled:LoadGuildAndFriendRoster()
 		end
@@ -347,7 +372,7 @@ function Misspelled.EditBox_OnTextChanged(editbox)
 	end
 
 
-	--if the first char is a /, indicating some command, do no spellcheck.
+	--if the first char is a /, indicating some slash command, skip spellchecking the text.
 	if (string_sub(text, 1, 1) == "/" ) then
 		local cleanedChatMessage = Misspelled:RemoveHighlighting(text)
 		if text ~= cleanedChatMessage then
@@ -590,7 +615,7 @@ function Misspelled:CheckLine(text, editbox)
 					--Cache the results
 					WordCache[word] = {["Correct"] = correct} --, ["Suggestions"] = {}}
 					WordCacheCount = WordCacheCount + 1
-					--Changed to delay searching for suggestions until someone righ-clicks on a missplled word.
+					--Changed to delay searching for suggestions until someone right-clicks on a misspelled word.
 					--Adding UTF8 support slows the suggestion generation.
 --~ 					if correct == false then
 --~ 						local suggestions = {}
@@ -623,7 +648,7 @@ end
 -- which are typically used to assert that a sequence is not present.
 -- Therefore, a single Lua regular expression cannot directly say "match everything until |r, but fail if |h is encountered before that".
 --
---Strategy: 
+--Potential refactor: 
 -- 1) Use a regular expression to match any block starting with |cff7dc6fb and ending with |r, capturing everything in between.
 --    regex capture: |c%x-(.-)|r
 -- 2) Check the captures text to ensure it does not contain the sequence |h.
@@ -634,6 +659,7 @@ end
 function Misspelled:RemoveHighlighting(text, ...)
 	-- \124 is the ASCII code for the pipe '|' character.
 	--Misspelled:AddToInspector(string_gsub(text, "\124", "\124\124"), "RemoveHighlighting-input")
+	--Blizzard uses string.gsub(textString, "[|]", "||"), in the /dump source code 
 	
 	local cleanedChatMessage
 	local newText = text
@@ -1057,15 +1083,19 @@ function MisspelledSuggestions_InitializeDropDown(level)
 	if RightClickedWord == nil then return end
 	if #RightClickedWord == 0 then return end
 
-	info = UIDropDownMenu_CreateInfo()
+	do
+	  local info = UIDropDownMenu_CreateInfo()
 	info.text = L["Suggestions for:"] .. " " .. RightClickedWord
 	info.isTitle = 1
 	info.notClickable = 1
 	info.notCheckable = true
 	UIDropDownMenu_AddButton(info)
+	end
 
+	--Add suggestions to the DropDown
 	for i, s in ipairs(WordCache[RightClickedWord].Suggestions) do
-		info = UIDropDownMenu_CreateInfo()
+		do
+			local info = UIDropDownMenu_CreateInfo()
                 --Line below causes a this == nil error in 4.0.  Looks like it's not needed.
 		--info.owner = this:GetParent()
 
@@ -1087,10 +1117,12 @@ function MisspelledSuggestions_InitializeDropDown(level)
 		info.func = function() SuggestionsFrame_Click(s.Word, RightClickedEditBox) end
 		--Add the above info to the options menu as clickable item
 		UIDropDownMenu_AddButton(info)
+		end
 	end
 
-	--Add a non clickable separator
-	info = UIDropDownMenu_CreateInfo()
+	do
+		--Add a non-clickable separator
+		local info = UIDropDownMenu_CreateInfo()
 	--info.owner = this:GetParent()
 	info.text = ""
 	info.isTitle = nil
@@ -1098,8 +1130,10 @@ function MisspelledSuggestions_InitializeDropDown(level)
 	info.notClickable = 1
 	info.notCheckable = true
 	UIDropDownMenu_AddButton(info)
+	end
 
-	info = UIDropDownMenu_CreateInfo()
+	do
+		local info = UIDropDownMenu_CreateInfo()
 	--info.owner = this:GetParent()
 	info.text = L["Ignore All"]
 	info.isTitle = nil
@@ -1108,8 +1142,10 @@ function MisspelledSuggestions_InitializeDropDown(level)
 	info.notClickable = nil
 	info.notCheckable = true
 	UIDropDownMenu_AddButton(info)
+	end
 
-	info = UIDropDownMenu_CreateInfo()
+	do
+		local info = UIDropDownMenu_CreateInfo()
 	--info.owner = this:GetParent()
 	info.text = L["Add to Dictionary"]
 	info.isTitle = nil
@@ -1118,8 +1154,10 @@ function MisspelledSuggestions_InitializeDropDown(level)
 	info.notClickable = nil
 	info.notCheckable = true
 	UIDropDownMenu_AddButton(info)
+	end
 
-	info = UIDropDownMenu_CreateInfo()
+	do
+		local info = UIDropDownMenu_CreateInfo()
 	--info.owner = this:GetParent()
 	info.text = L["Cancel"]
 	info.isTitle = nil
@@ -1127,6 +1165,7 @@ function MisspelledSuggestions_InitializeDropDown(level)
 	info.notClickable = nil
 	info.notCheckable = true
 	UIDropDownMenu_AddButton(info)
+	end
 end
 
 function MisspelledSuggestions_DropDownOnLoad(self)
@@ -1140,12 +1179,15 @@ function SuggestionsFrame_Click(value, editbox)
 	--print("Suggestion Clicked: ", value)
 
 	local newText = editbox:GetText()
-	local newCurcorPos = nil
+	local newCursorPos = nil
 
-	local isCapitalizedRighClickedWord = false
+	local isCapitalizedRightClickedWord = false
+
+	--Check if the local (global) var RightClickedWord is populated with a non nil value
+    assert(RightClickedWord ~= nil, "Misspelled: SuggestionsFrame_Click, Unexpected: RightClickedWord == nil")
 
 	if string_sub(RightClickedWord, 1, 1) == string_upper(string_sub(RightClickedWord, 1, 1)) then
-		isCapitalizedRighClickedWord = true
+		isCapitalizedRightClickedWord = true
 	end
 
 	if value == "###IgnoreAll" then
@@ -1174,7 +1216,7 @@ function SuggestionsFrame_Click(value, editbox)
 		--Remove the misspelled highlighting in the process.
 		--
 		--If the misspelled word was capitalized, capitalize the replacement.
-		if isCapitalizedRighClickedWord == true then
+		if isCapitalizedRightClickedWord == true then
 			value = string_upper(string_sub(value, 1, 1)) .. string_sub(value, 2)
 		end
 		newText = string_sub(newText, 1, RightClickedWordStartPos - 1 - #SPELLED_WRONG_HIGHLIGHT) .. value .. string_sub(newText, RightClickedWordEndPos + #FONT_COLOR_CODE_CLOSE + 1)
@@ -1187,7 +1229,7 @@ function SuggestionsFrame_Click(value, editbox)
 
 	editbox:SetText(newText)
 
-	--printable = gsub(newText, "\124", "\124\124")
+	--printable = gsub(newText, "\124", "\124\124")  --\124 == "|"
     --print("New ChatText:", printable)
 
 	--If we replaced a word, with a suggestion, move the cursor to the end of the new word.
@@ -1218,7 +1260,7 @@ end
 
 --Load the words saved in the Users dictionary into the baseWords table.
 --In r18 we changed the in memory format used to store the baseWords, affixCode and PhoneticCode,
---Saved a ton of memory not using a sub-table per paseword.
+--Saved a ton of memory not using a sub-table per baseWord.
 --If necessary convert the user dictionary storage to match the newer format.
 function Misspelled:LoadUserDict()
 	if Misspelled_DB == nil then
@@ -1390,30 +1432,30 @@ end
 --loaded dictionary.
 function Misspelled:LoadGuildAndFriendRoster()
 
-	local numFriends, name
+	local numFriends, f --FriendInfo (https://warcraft.wiki.gg/wiki/API_C_FriendList.GetFriendInfo)
 	local pcode
 
-	--print("Misspelled: Guild Members Loading...")
+	--print("Misspelled: Friends names and guild members loading...")
 
 	--First check your friends list
-	if GetNumFriends ~= nil then
-		numFriends = GetNumFriends()
+	if C_FriendList.GetNumFriends ~= nil then
+		numFriends = C_FriendList.GetNumFriends()
 		if numFriends > 0 then
 			for i = 1, numFriends do
-				name = GetFriendInfo(i)
-				if name ~= nil then
-					if #name > 0 then
-						if WordDict:Contains(name) == false then
+				f = C_FriendList.GetFriendInfoByIndex(i)
+				if f ~= nil then
+					if #f.name > 0 then
+						if WordDict:Contains(f.name) == false then
 							--Look up the phonetic code for this friend name
-							if WordDict.soundslike == "Phonetic" then
-								pcode = WordDict:PhoneticCode(name)
-							elseif WordDict.soundslike == "Generic" then
-								pcode = WordDict:GenericSoundsLike(name)
+							if WordDict.soundslike == WordDict.Const.SoundslikeAlgorithms.PHONETIC then
+								pcode = WordDict:PhoneticCode(f.name)
+							elseif WordDict.soundslike == WordDict.Const.SoundslikeAlgorithms.GENERIC then
+								pcode = WordDict:GenericSoundsLike(f.name)
 							else
 								pcode = ""
 							end
 							--Add the friend name to the loaded dictionary
-							WordDict.baseWords[name] = "/" .. pcode
+							WordDict.baseWords[f.name] = "/" .. pcode
 						end
 					end
 				end
@@ -1422,24 +1464,25 @@ function Misspelled:LoadGuildAndFriendRoster()
 	end
 
 	-- Guild members are valid words.
-	if GetNumGuildMembers(true) ~= 0 then
-		numFriends = GetNumGuildMembers(true)	-- true to include offline members
-		if ( numFriends > 0 ) then
-			for i=1, numFriends do
-				name = GetGuildRosterInfo(i);
-				if name ~= nil then
-					if #name ~= 0 then
-						if WordDict:Contains(name) == false then
+	local numTotalInGuild, guildMemberName
+	if GetNumGuildMembers() ~= 0 then
+		numTotalInGuild = GetNumGuildMembers()
+		if ( numTotalInGuild > 0 ) then
+			for i=1, numTotalInGuild do
+				guildMemberName = GetGuildRosterInfo(i);
+				if guildMemberName ~= nil then
+					if #guildMemberName ~= 0 then
+						if WordDict:Contains(guildMemberName) == false then
 							--Look up the phonetic code for this guild member name
-							if WordDict.soundslike == "Phonetic" then
-								pcode = WordDict:PhoneticCode(name)
-							elseif WordDict.soundslike == "Generic" then
-								pcode = WordDict:GenericSoundsLike(name)
+							if WordDict.soundslike == WordDict.Const.SoundslikeAlgorithms.PHONETIC then
+								pcode = WordDict:PhoneticCode(guildMemberName)
+							elseif WordDict.soundslike == WordDict.Const.SoundslikeAlgorithms.GENERIC then
+								pcode = WordDict:GenericSoundsLike(guildMemberName)
 							else
 								pcode = ""
 							end
 							--Add the guild member to the loaded dictionary
-							WordDict.baseWords[name] = "/" .. pcode
+							WordDict.baseWords[guildMemberName] = "/" .. pcode
 						end
 					end
 				end
@@ -1712,12 +1755,13 @@ end
 
 --Split a string, at patt delimiter, into a table
 function Misspelled:split(str, patt)
-	vals = {}; valindex = 0; word = ""
+	local vals = {}
+	local valindex = 0
+	local word = ""
 	-- need to add a trailing separator to catch the last value.
 	str = str .. patt
 	for i = 1, string_len(str) do
-
-		cha = string_sub(str, i, i)
+		local cha = string_sub(str, i, i)
 		if cha ~= patt then
 			word = word .. cha
 		else
@@ -1773,11 +1817,11 @@ end
 function Misspelled:IsFriend(name)
 	local numFriends
 
-	if GetNumFriends ~= nil then
-		numFriends = GetNumFriends()
+	if C_FriendList.GetNumFriends ~= nil then
+		numFriends = C_FriendList.GetNumFriends()
 		if numFriends > 0 then
 			for i = 1, numFriends do
-				if name == GetFriendInfo(i) then
+				if name == C_FriendList.GetFriendInfoByIndex(i) then
 					return true
 				end
 			end

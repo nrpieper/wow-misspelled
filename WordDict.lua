@@ -223,6 +223,7 @@ end
 
 --WordDict Class
 WordDict = {}
+
 WordDict = {
 			locale = "",
 			baseWords = {},
@@ -238,6 +239,10 @@ WordDict = {
 			maxSuggestions = 8,
 			maxEditDistance = 4
 			}
+
+WordDict.Const = {
+	SoundslikeAlgorithms = {GENERIC="Generic", PHONETIC="Phonetic"} --Enum for the type of sounds like algorithm used in this dictionary.
+}
 
 WordDict.AffixUtility = {}
 
@@ -289,10 +294,10 @@ function WordDict.AffixUtility:EncodeConditions(conditionText)
 	--If no condition just return
 	if conditionText == "." then
 		conditionCount = 0
-		return conditionCount, Condition
+		return conditionCount, condition
 	end
 
-	for i = 1, str_len(conditionText) do
+	for i = 1, string_len(conditionText) do
 		local cond = str_sub(conditionText, i, i)
 		--	print("i", i, "cond", cond)
 
@@ -347,7 +352,7 @@ function WordDict.AffixUtility:EncodeConditions(conditionText)
 					if cond == "." then
 						--wild char character, turn all chars on
 						for j=0, 255 do
-							condition[j] = bit_bor(condition[j], bit_lshift(1, CounditionCount))
+							condition[j] = bit_bor(condition[j], bit_lshift(1, conditionCount))
 						end
 					else
 						--turn on char
@@ -379,7 +384,7 @@ function WordDict.AffixUtility:EncodeConditions(conditionText)
 				if group == true then
 					utf8Condition.neg[conditionCount] = neg
 					--
-					--First handel the Acsii one byte utf8 chars
+					--First handel the Ascii one byte utf8 chars
 					--
 					if neg == false then
 						--set the proper bits in the condition array vals for those chars
@@ -1058,7 +1063,7 @@ function WordDict:LoadPhoneticRules()
 	--Part1: Encoded Rule
 	--Part2: ReplaceString
 	for i, v in ipairs(pr) do
-		parsedrule = split(v, "%s+")
+		local parsedrule = split(v, "%s+")
 		--self.phoneticRules[i]= {parsedrule[1], parsedrule[2]}
 		self.phoneticRules[i] = WordDict.PhoneticUtility:EncodeRule(parsedrule[1])
 		self.phoneticRules[i]["ReplaceString"] = parsedrule[2]
@@ -1867,9 +1872,9 @@ function WordDict:Suggest(currentWord)
 
 	for tempWord, v in pairs(WordDict.possibleBaseWords) do
 		if tempWord ~= nil and #tempWord ~= 1 then
-			if self.soundslike == "Phonetic" then
+			if self.soundslike == WordDict.Const.SoundslikeAlgorithms.PHONETIC then
 				tempCode = WordDict:PhoneticCode(tempWord)
-			elseif self.soundslike == "Generic" then
+			elseif self.soundslike == WordDict.Const.SoundslikeAlgorithms.GENERIC then
 				tempCode = WordDict:GenericSoundsLike(tempWord)
 			else
 				tempCode = ""
@@ -2056,7 +2061,7 @@ function WordDict:Init(locale)
 	self:LoadPrefixRules()
 	self:LoadSuffixRules()
 
-	--Some languanges just use the generic sounds like routine.
+	--Some languanges just use the generic sounds like routine, while most have a phonetic code defined for each baseword.
 	self.soundslike = DICTIONARY_TO_LOAD_FROM.Soundslike
 	if self.soundslike == "Phonetic" then
 		--Load Phonetic Rules
