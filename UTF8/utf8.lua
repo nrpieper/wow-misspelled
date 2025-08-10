@@ -344,8 +344,8 @@ end
 
 
 --functions acts like string.byte (s [, i [, j]])
---function returns the 4byte integer/s for a utf8 char as pos 'i' through 'j' in string 's'
-function utf8byte(s, ...)
+--function returns the 4byte integer/s for a utf8 char as the specified indicies "string", 2,3.
+local function utf8byte(s, ...)
  	-- argument checking
  	if type(s) ~= "string" then
  		error("bad argument #1 to 'utf8sub' (string expected, got ".. type(s).. ")")
@@ -360,7 +360,7 @@ function utf8byte(s, ...)
 		return utf8charToInt(utf8sub(s, 1, 1))
 	end
 
-	return i, unpack(arg)
+	return unpack(arg)
 end
 
 --install in the string library
@@ -368,7 +368,7 @@ if not string.utf8byte then
 	string.utf8byte = utf8byte
 end
 
---print(utf8byte("ACĐ", 1, 2, 3))  --Đ
+--print(utf8byte("ACĐ", 1, 3))  --Output: 65<tab>50320
 
 
 -- replace UTF-8 characters based on a mapping table
@@ -454,4 +454,31 @@ end
 -- install in the string library
 if not string.utf8reverse then
 	string.utf8reverse = utf8reverse
+end
+
+-- Convert UTF-8 character offset to byte offset
+local function utf8charpos_to_bytepos(str, charpos)
+    if charpos <= 0 then return 0 end
+    local bytepos = 1
+    local chars = 0
+    local strlen = #str
+    while bytepos <= strlen and chars < charpos do
+        local c = string.byte(str, bytepos)
+        local charbytes = 1
+        if c >= 0xF0 then
+            charbytes = 4
+        elseif c >= 0xE0 then
+            charbytes = 3
+        elseif c >= 0xC0 then
+            charbytes = 2
+        end
+        bytepos = bytepos + charbytes
+        chars = chars + 1
+    end
+    return bytepos - 1
+end
+
+-- install in the string library
+if not string.utf8charpos_to_bytepos then
+	string.utf8charpos_to_bytepos = utf8charpos_to_bytepos
 end

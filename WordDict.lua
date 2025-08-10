@@ -50,7 +50,7 @@ All accepted words with this dictionary: "hello", "try", "tried", "work", "worke
 
 Affix Compression
 --------------------------------------------------------------------------
-An affix is either a  prefix or a suffix attached to root words to make
+An affix is either a prefix or a suffix attached to root words to make
 other words.  For example supply -> supplied by dropping the "y" and
 adding an "ied" (the suffix).
 
@@ -99,7 +99,7 @@ the last character of the word must end in "y".
 
 So how can we encode this information concisely and be able to
 test for both conditions in a fast manner?  The answer is found
-but studying the wonderful ispell code of Geoff Kuenning, et.al.
+by studying the wonderful ispell code of Geoff Kuenning, et.al.
 (now available under a normal BSD license).
 
 If we set up a conds array of 256 bytes indexed (0 to 255) and access it
@@ -150,14 +150,14 @@ first two affentries for the suffix D described earlier.
 
 --]]
 
-if bit == nil then
-	require("bit")
-end
+-- if bit == nil then
+-- 	require("bit")
+-- end
 
-if string.utf8len == nil then
-	require("UTF8\\utf8data")
-	require("UTF8\\utf8")
-end
+-- if string.utf8len == nil then
+-- 	require("UTF8\\utf8data")
+-- 	require("UTF8\\utf8")
+-- end
 
 
 --Local reference to Global functions for speed
@@ -168,7 +168,7 @@ local string_utf8byte = string.utf8byte
 local string_find = string.find
 local string_gsub = string.gsub
 local string_len = string.len
-local string_utf8len = string.utf8len
+local string_utf8len = strlenutf8
 local string_lower = string.lower
 local string_utf8lower = string.utf8lower
 local string_match = string.match
@@ -231,7 +231,8 @@ WordDict = {
 			prefixRules = {},
 			suffixRules = {},
 			phoneticRules= {},
-			tryChars = {},
+			tryChars = "",
+			--tryChars = {},  --Should be a string not a table. loaded dictionary table: Try[1]
 			lastContainsWord = "",
 			possibleBaseWords = {},
 			suggestions= {},
@@ -489,9 +490,9 @@ function WordDict.AffixUtility:RemoveSuffix(word, entry)
 			end
 		end
 	else
-		tempLength = string_utf8len(word) - string_utf8len(entry.AddChars)
+		tempLength = strlenutf8(word) - strlenutf8(entry.AddChars)
  		if (tempLength > 0)
-			and (tempLength + string_utf8len(entry.StripChars) >= entry.ConditionCount)
+			and (tempLength + strlenutf8(entry.StripChars) >= entry.ConditionCount)
 			and (string_match(word, entry.AddChars .. "$") ~= nil) then --word ends with suffix
 
 			--word without suffix
@@ -502,7 +503,7 @@ function WordDict.AffixUtility:RemoveSuffix(word, entry)
 			--check if tempWord is valid
 			passCount = 0
 			for i = 0, entry.ConditionCount - 1 do
-				c = string_utf8sub(tempWord, string_utf8len(tempWord) - (entry.ConditionCount - i) + 1)
+				c = string_utf8sub(tempWord, strlenutf8(tempWord) - (entry.ConditionCount - i) + 1)
 				charCode = string_utf8byte(c)
 
 				--if this charCode is 1 byte, check the utf8Condition.Ascii table
@@ -577,13 +578,13 @@ function WordDict.AffixUtility:RemovePrefix(word, entry)
 			end
 		end
 	else
-		tempLength = string_utf8len(word) - string_utf8len(entry.AddChars)
+		tempLength = strlenutf8(word) - strlenutf8(entry.AddChars)
  		if (tempLength > 0)
- 			and (tempLength + string_utf8len(entry.StripChars) >= entry.ConditionCount)
+ 			and (tempLength + strlenutf8(entry.StripChars) >= entry.ConditionCount)
 			and (string_match(word, "^" .. entry.AddChars) ~= nil) then --word starts with
 
 			--word with out prefix
-			tempWord = string_sub(word, string_utf8len(entry.AddChars) + 1)
+			tempWord = string_sub(word, strlenutf8(entry.AddChars) + 1)
 			--add back strip chars
 			tempWord = entry.StripChars .. tempWord
 
@@ -662,11 +663,11 @@ function WordDict.AffixUtility:AddSuffix(word, rule)
 				end
 			end
 		else  --utf8
-			if string_utf8len(word) >= entry.ConditionCount then
+			if strlenutf8(word) >= entry.ConditionCount then
 				passCount = 0
 				for i = 0, entry.ConditionCount - 1 do
 					--For each condition, we need to check utf8 characters at the end of the word
-					local conditionPos = string_utf8len(word) - (entry.ConditionCount - i) + 1
+					local conditionPos = strlenutf8(word) - (entry.ConditionCount - i) + 1
 					local c = string_utf8sub(word, conditionPos, conditionPos)
 					charCode = string_utf8byte(c)
 
@@ -748,7 +749,7 @@ function WordDict.AffixUtility:AddPrefix(word, rule)
 				end
 			end
 		else  --utf8
-			if string_utf8len(word) >= entry.ConditionCount then
+			if strlenutf8(word) >= entry.ConditionCount then
 				passCount = 0
 				for i = 0, entry.ConditionCount - 1 do
 					--For each condition, we need to check utf8 characters at the end of the word
@@ -974,7 +975,7 @@ function WordDict.PhoneticUtility:EncodeRule(ruleText)
 
 	if utf8 then
 		string_byte = string_utf8byte
-		string_len = string_utf8len
+		string_len = strlenutf8
 		string_sub = string_utf8sub
 	end
 
@@ -1121,7 +1122,7 @@ function WordDict:PhoneticCode(word)
 
 	if utf8 then
 		string_byte = string_utf8byte
-		string_len = string_utf8len
+		string_len = strlenutf8
 		string_sub = string_utf8sub
 		string_upper = string_utf8upper
 	end
@@ -1251,7 +1252,9 @@ function WordDict:GenericSoundsLike(text)
 end
 
 
---Searched all containted word lists for word
+---Searches all containted word lists for word.  Return true if word is found.
+---@param word  string
+---@return boolean
 function WordDict:Contains(word)
 	--save the word we're checking, so if someone calls Suggest(word)
 	--without first calling Contains, we can, call Contains() to refresh the
@@ -1350,7 +1353,7 @@ function WordDict:ExpandWord(word, affixKeys)
 	local string_sub = string_sub
 
 	if utf8 then
-		string_len = string_utf8len
+		string_len = strlenutf8
 		string_sub = string_utf8sub
 	end
 
@@ -1406,7 +1409,7 @@ function WordDict:EditDistance(source, target)
 	local string_sub = string_sub
 
 	if utf8 == true then
-		string_len = string_utf8len
+		string_len = strlenutf8
 		string_lower = string_utf8lower
 		string_sub = string_utf8sub
 	end
@@ -1682,7 +1685,7 @@ function WordDict:BadChar(CurrentWord)
 	local string_lower = string_lower
 
 	if utf8 then
-		string_len = string_utf8len
+		string_len = strlenutf8
 		string_sub = string_utf8sub
 		string_lower = string.utf8lower
 	end
@@ -1725,7 +1728,7 @@ function WordDict:ExtraChar(CurrentWord)
 	local string_lower = string_lower
 
 	if utf8 == true then
-		string_len = string_utf8len
+		string_len = strlenutf8
 		string_sub = string_utf8sub
 		string_lower = string_utf8lower
 	end
@@ -1757,7 +1760,7 @@ function WordDict:ForgotChar(CurrentWord)
 	local string_lower = string_lower
 
 	if utf8 == true then
-		string_len = string_utf8len
+		string_len = strlenutf8
 		string_sub = string_utf8sub
 		string_lower = string_utf8lower
 	end
@@ -1788,7 +1791,7 @@ function WordDict:SwapChar(CurrentWord)
 	local string_lowr = string_lower
 
 	if utf8 == true then
-		string_len = string_utf8len
+		string_len = strlenutf8
 		string_sub = string_utf8sub
 		string_lower = string_utf8lower
 	end
@@ -1826,7 +1829,7 @@ function WordDict:TwoWords(CurrentWord)
 	local string_lower = string_lower
 
 	if utf8 == true then
-		string_len = string_utf8len
+		string_len = strlenutf8
 		string_sub = string_utf8sub
 		string_lower = string_utf8lower
 	end
@@ -2143,7 +2146,7 @@ function test1()
 	testword = "angstrœms"
 	testword = "qu'a"
 	print("Contains")
-	print("Testing: " ..testword, WordDict:Contains(testword), "Len", string_utf8len(testword))
+	print("Testing: " ..testword, WordDict:Contains(testword), "Len", strlenutf8(testword))
     tprint(WordDict:Suggest(testword))
 
 	--s, sc = WordDict:ReplaceChars("holla")

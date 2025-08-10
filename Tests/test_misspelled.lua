@@ -17,9 +17,18 @@ function Misspelled.Tests.Misspelled:ChatEditCursorPosition()
 	assert(editbox:GetUTF8CursorPosition() == 7)
 
 	--UFT8 text
-	editbox:SetText("áéí.")
+	editbox:SetText("éí.á")
 	assert(editbox:GetCursorPosition() == 7)
 	assert(editbox:GetUTF8CursorPosition() == 4)
+
+    editbox:SetText("test: |cnIQ2:|Hitem:225566::::::::80:258:::::::::|h[Warped Wing]|h|r |cff7dc6fbbadd|r.")
+	assert(editbox:GetCursorPosition() == 86)
+	assert(editbox:GetUTF8CursorPosition() == 86)
+
+	--Testing UTF8 á subsitition in the string
+	editbox:SetText("test: |cnIQ2:|Hitem:225566::::::::80:258:::::::::|h[Warped Wing]|h|r |cff7dc6fbbádd|r.")
+	assert(editbox:GetCursorPosition() == 87)
+	assert(editbox:GetUTF8CursorPosition() == 86)
 end
 
 -- Tests for Misspelled:TestRemoveHighlighting

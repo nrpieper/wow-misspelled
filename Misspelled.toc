@@ -39,7 +39,9 @@ Dict\Dic_ruRU.lua
 WordDict.lua
 Misspelled.lua
 Misspelled.xml
+Misspelled_Options.lua
 
 Tests\test_misspelled.lua
 Tests\test_performance.lua
+Tests\test_utf8.lua
 Tests\test_runner.lua

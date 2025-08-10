@@ -1,4 +1,8 @@
 # Notes
+
+### Tests
+Run tests with the WowLua addon and call: `Misspelled.Tests:RunTests()`, to run all tests.
+
 ### Bugs
 Issue: Fix euro € symbol causing the whole line to be highlighted as misspelled.
 Possible utf8 lib https://github.com/tst2005/lua-utf8string/blob/master/utf8string.lua
@@ -20,6 +24,19 @@ https://web.archive.org/web/20120826142853/http://developer.coronalabs.com/code/
 
 editbox.GetUTF8CursorPosition()
 SetCursorPosition - needs to be tested to see if it utf8 aware
+
+CursorPosition is the current location of the edit cursor in the editbox text, including the UI escape sequence codes, not just the display text.
+
+-- For All Indents And Purposes -
+-- a indentation + syntax highlighting library
+FAIAP.lua has cursor tracking and they implement it by first inserting a tracking token '\2', stripping color tags then finding the tracking token to return the new cursor position:
+    function lib.stripWowColorsWithPos(code, pos)
+        code = stringinsert(code, pos, "\2")
+        code = lib.stripWowColors(code)
+        pos = stringfind(code, "\2", 1, 1)
+        code = stringdelete(code, pos, pos)
+        return code, pos
+    end
 
 **Fixed - Issue: Wow 11 - War Within, issue loading interface options (Misspellec.lua: 1417 disabled for now)
 Looking to convert addon options to use AceConfig.
