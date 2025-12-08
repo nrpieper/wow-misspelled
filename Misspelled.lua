@@ -217,12 +217,23 @@ function Misspelled:OnInitialize()
 	--Moved to OnTextChanged
 	--GuildRoster()
 
-	--Patch 3.5 has multiple ChatEditBoxes.  We need to hook in differently.
-	if ChatEdit_ActivateChat ~= nil then
-		Misspelled:RawHook("ChatEdit_ActivateChat", true)
-	else
-		Misspelled:WireUpEditBox(ChatFrameEditBox)
-	end
+	--Patch 3.5+ has multiple ChatEditBoxes.  We need to hook in differently.
+	--Updated for WoW 11.2.7: ChatEdit_ActivateChat exists but is never called.
+	--Force the new timer-based approach.
+	
+	-- Use timer-based approach for 11.2.7+
+	local self = Misspelled
+	C_Timer.After(0.1, function()
+		for i = 1, NUM_CHAT_WINDOWS do
+			local editbox = _G["ChatFrame" .. i .. "EditBox"]
+			if editbox then
+				local hooked = self:IsHooked(editbox, "OnTextChanged")
+				if not hooked then
+					self:WireUpEditBox(editbox)
+				end
+			end
+		end
+	end)
 
 
 	-- hooks for removing any misspelled word highlighting in the text before the chat message is sent
