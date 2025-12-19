@@ -54,14 +54,20 @@ jobs:
         with:
           args: -g classic
 
-      # Release - Wrath Classic
-      - name: Package and release for Wrath Classic
+      # Release - Wrath
+      - name: Package and release for Wrath
         uses: BigWigsMods/packager@master
         with:
           args: -g wrath
 
-      # Release - Cata Classic
-      - name: Package and release for Cata Classic
+      # Release - Cata
+      - name: Package and release for Cata
         uses: BigWigsMods/packager@master
         with:
           args: -g cata
+
+      # Release - Mists
+      - name: Package and release for Mists
+        uses: BigWigsMods/packager@master
+        with:
+          args: -g mists
