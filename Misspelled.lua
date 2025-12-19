@@ -141,14 +141,14 @@ local WORD_BOUNDARY_SET = {
 local WordCache = {}           --Stores a cache of every word checked, along with the suggestions for words misspelled
 local WordCacheCount = 0       --Counter used to track when we should clean the WordCache table to save memory
 local WordCacheCountMax = 7000 --Number of entries tha can live in the WordCache before we clean the cache
-local WordLocations = {}       --Lookup table used by multiple functions to determine where each work starts and ends
+local WordPositions = {}       --Lookup table used by multiple functions to determine where each work starts and ends
 							   --There will be a sub-table for each EditBox:GetName() so we can store multiple sets of info at once.
 local SkipOnTextChanged = false -- use to avoid OnTextChanged event firing after spell checking highlights chat text.
 local RightClickedWord = nil   --The current word under the UTF8CursorPosition that was right-clicked
 local RightClickedWordStartPos --Where that word starts
 local RightClickedWordEndPos   --and where that word ends
 local RightClickedEditBox      --and what EditBox was right clicked
-local OldLineCharCount = 0     --Tracks the previous UTF8 character count of the ChatEditBox.text (using strlenutf8)
+local PreChatTextUTF8Len = 0     --Tracks the previous UTF8 character length of the ChatEditBox.text (using strlenutf8)
 local GuildRosterCalled = false
 local MaxColorCodes = 12       --The max amount of color codes we will add to the editbox text.
 
@@ -172,9 +172,13 @@ function Misspelled:AddToInspector(data, strName)
 	end
 end
 
+function Misspelled.DebugPrint(message)
+	if Misspelled.DEBUG == true then print(message) end
+end
+
 function Misspelled:OnInitialize()
     --Enable to output debug messages created with calls to: AddToInspector(data, strName), to the addon: DevTool
-	--self.DEBUG = true
+	self.DEBUG = true
 
 	if Misspelled_DB == nil then
 		Misspelled_DB = {}
@@ -341,22 +345,24 @@ function Misspelled.SendChatMessage(message, chatType, languageID, target, ...)
 	end
 end
 
---Possible changes:
---A single new character was inserted at the end of the line (line length grew by 1)
---	  If this char is a word separator, then spell check the line
+-- Fires evertime the text changes in the editbox
+-- 
+-- Possible changes:
+-- A single new character was inserted at the end of the line (line length grew by 1)
+--   If this char is a word separator, then spell check the line
 --
---Any other change in the line, requires we recheck the entire line.
---More than a single character was pasted or linked into the line.
---	remove any highlighting and recheck the entire line.
+-- Any other change in the line, requires we recheck the entire line.
+-- More than a single character was pasted or linked into the line.
+--   remove any highlighting and recheck the entire line.
 --
---A single character was removed from the line
+-- A single character was removed from the line
 function Misspelled.EditBox_OnTextChanged(editbox)
 	if SkipOnTextChanged == true then
 		SkipOnTextChanged = false
 		return
 	end
 
-	--print("Editbox name:", editbox:GetName())
+	Misspelled.DebugPrint("EditBox_OnTextChanged - Editbox name: " .. editbox:GetName() .. ", CPos: " .. editbox:GetCursorPosition() .. ", CUTF8Pos: " .. editbox:GetUTF8CursorPosition())
 
 	--Load the guild roster if needed
 	if GuildRosterCalled == false then
@@ -370,81 +376,75 @@ function Misspelled.EditBox_OnTextChanged(editbox)
 
 
 	local text = editbox:GetText()
-	local currentCursorPosition = editbox:GetUTF8CursorPosition()
-	local currentLineByteLength = #text -- Current byte length
-	local currentLineCharCount = strlenutf8(text) -- Current character count
+	local currentUTF8CursorPosition = editbox:GetUTF8CursorPosition()
+	local currentByteCursorPosition = editbox:GetCursorPosition()
+
+	--local currentLineByteLength = #text -- Current byte length
+	local currentChatTextUTF8Len = strlenutf8(text) -- Current character count
 
 	--print ("TextChanged:", editbox:GetCursorPosition(), string.gsub(editbox:GetText(), "\124", "\124\124"))
 
-	--Check if we should clear the WordCache table to save memory, if it's gotten very large
-	if currentLineByteLength == 0 then -- Using byte length for empty check is fine and efficient
-		if WordCacheCount > WordCacheCountMax then
-			WordCache = {}
-			WordCacheCount = 0
-		end
-	end
+	-- Check if we should clear the WordCache table to save memory, if it's gotten very large
+    if currentChatTextUTF8Len == 0 and WordCacheCount > WordCacheCountMax then
+        WordCache = {}
+        WordCacheCount = 0
+    end
 
-
-	--if the first char is a /, indicating some slash command, skip spellchecking the text.
+    -- Slash commands are skipped
+	-- if the first char is a /, indicating some slash command, potentially with existing text previsouly added to the editbox.
+	-- Remove any existing highlighted missplled words and skip spellchecking the chat text.
 	if (string_sub(text, 1, 1) == "/" ) then
-		local cleanedChatMessage = Misspelled:RemoveHighlighting(text)
-		if text ~= cleanedChatMessage then
+		local cleanedChatMessage, newByteCursorPosition = Misspelled:RemoveHighlighting(text, currentByteCursorPosition)
+		if cleanedChatMessage ~= text then
+			SkipOnTextChanged = true
 			editbox:SetText(cleanedChatMessage)
-			if currentCursorPosition == 0 or currentCursorPosition == 1 then -- GetUTF8CursorPosition is 0-based for start
-			  editbox:SetCursorPosition(currentCursorPosition)
-			end
-			-- Update OldLineCharCount to the character count of the new text
-			OldLineCharCount = strlenutf8(editbox:GetText())
-		end
-
-		RightClickedWord = nil
-		WordLocations[editbox:GetName()] = {}
-		return
+            editbox:SetCursorPosition(1) -- move the cursor to the position after the / character.
+			PreChatTextUTF8Len = strlenutf8(cleanedChatMessage)
+        end
+        
+        RightClickedWord = nil
+        WordPositions[editbox:GetName()] = {}
+        return
 	end
 
-
-	--If we currently just added one new char to the end of the line, see if it's a word boundary char
-	--CursorPosition (currentCursorPosition) must be at the end of the line, and the character count
-	--must have had grown by one character compared to the previous character count (OldLineCharCount).
-	if currentCursorPosition == currentLineCharCount and currentLineCharCount - 1 == OldLineCharCount then
-		local lastChar
-		if currentLineCharCount > 0 then
-			-- Use string.utf8sub to get the last character using 1-based character indexing
-			lastChar = string.utf8sub(text, currentLineCharCount)
-		end
+    -- Detect last character added
+	-- If we currently just added one new char to the end of the line, see if it's a word boundary char
+	-- CursorPosition (currentCursorPosition) must be at the end of the line, and the character count
+	-- must have had grown by one character compared to the previous character count (OldLineCharCount).
+	if currentUTF8CursorPosition == currentChatTextUTF8Len and (currentChatTextUTF8Len - PreChatTextUTF8Len) == 1 then
+    	-- UTF8 safe single character extraction Use string.utf8sub to get the last character using 1-based character indexing
+		local lastChar = string.utf8sub(text, currentChatTextUTF8Len, currentChatTextUTF8Len)
 
 		-- Use strcmputf8i for UTF-8 safe comparison
-		if lastChar then
-			for boundaryChar, _ in pairs(WORD_BOUNDARY_SET) do
-                if strcmputf8i(lastChar, boundaryChar) == 0 then
-                    Misspelled:SpellCheckChat(editbox)
-                    break
-                end
+		for boundaryChar, _ in pairs(WORD_BOUNDARY_SET) do
+            if strcmputf8i(lastChar, boundaryChar) == 0 then
+				Misspelled.DebugPrint("EditBox_OnTextChanged - Last character: " .. lastChar .. " was a word boundry - checking spelling")
+                Misspelled:SpellCheckChat(editbox)
+                break
             end
         end
-    elseif currentCursorPosition ~= currentLineCharCount then -- Making edits not at the very end.
-        ----We must be making some other kind of edit someplace other than at the end of the line.
-        ----Recheck the entire line
+    elseif currentUTF8CursorPosition ~= currentChatTextUTF8Len then
+        -- Editing in the middle -> recheck the full line
+		Misspelled.DebugPrint("EditBox_OnTextChanged - mid-line character edit - checking spelling")
         Misspelled:SpellCheckChat(editbox)
     end
 
     --Save the new line length for use with the next round of OnTextChanged processing.
-    -- OldLineCharCount now stores character count
-    OldLineCharCount = currentLineCharCount
+    PreChatTextUTF8Len = strlenutf8(editbox:GetText())
 end
 
 function Misspelled.EditBox_OnEscapePressed(editbox)
 	RightClickedWord = nil
-	WordLocations[editbox:GetName()] = {}
+	WordPositions[editbox:GetName()] = {}
 end
 
 function Misspelled.EditBox_OnEnterPressed(editbox)
 	RightClickedWord = nil
-	WordLocations[editbox:GetName()] = {}
+	WordPositions[editbox:GetName()] = {}
 
 	--before message is sent, remove and misspelled highlighting
 	local cleanedChatMessage = Misspelled:RemoveHighlighting(editbox:GetText())
-	WordLocations[editbox:GetName()] = {}
+	WordPositions[editbox:GetName()] = {}
 	editbox:SetText(cleanedChatMessage)
 end
 
@@ -454,9 +454,9 @@ end
 --We should keep track of the current edit cursor position,
 --so we can report it's new position after highlighting.
 function Misspelled:SpellCheckChat(editbox)
-	local editboxText = editbox:GetText()
+	local originalText = editbox:GetText()
 
-	if strlenutf8(editboxText) < 2 then return end
+	if strlenutf8(originalText) < 2 then return end
 
 	--Ensure we have hooked the MouseUp event
 	--Should fix Chatter changing the OnMouseUp script to nil.  Bad Chatter
@@ -466,83 +466,85 @@ function Misspelled:SpellCheckChat(editbox)
 		Misspelled:RawHookScript(editbox, "OnMouseUp", Misspelled.EditBox_OnMouseUp)
 	end
 
-	local newText = editboxText
+	-- Track and adjust the cursor position to compensate for any misspelled word Hex code colored text added by Misspelled.
+	-- remove any previous misspelling highlighting before checking the editboxText for misspellings.
+	local cursorBytePos = editbox:GetCursorPosition()
+    local workingText, workingCursorBytePos = Misspelled:RemoveHighlighting(originalText, cursorBytePos)
+    Misspelled.DebugPrint("SpellCheckChat - 1: RemoveHighlighting, curBPos: "..cursorBytePos.." , wCurBPos: "..workingCursorBytePos)
 
-	--Watch how many characters we insert or remove from the left side of the cursor position.
-	--We'll adjust the cursor position to compensate for any misspelled word Hex code colored text added by Misspelled.
-	local newCPos
+	--Clear the cache of WordPositions for this editbox
+	WordPositions[editbox:GetName()] = {}
 
-	--remove any previous misspelling highlighting before checking the editboxText for misspellings.
-	newText, newCPos = Misspelled:RemoveHighlighting(editboxText, editbox:GetUTF8CursorPosition())
-
-	WordLocations[editbox:GetName()] = {}
-
-	--If this is a command, don't spellcheck or highlight
-	if string_sub(editboxText, 1, 1) == "/" then
-		if newText ~= editboxText then
-			editbox:SetText(newText)
-			editbox:SetCursorPosition(newCPos)
-		end
-	end
+    -- Slash commands not checked
+    if string_sub(originalText, 1, 1) == "/" then
+		-- --This shouldn't be needed as EditBox_OnTextChanged doesn't trigger checking text starting with a slash command /
+        -- if workingText ~= originalText then
+        --     SkipOnTextChanged = true
+        --     editbox:SetText(workingText)
+        --     editbox:SetCursorPosition(workingCursorBytePos)
+        -- end
+        return
+    end
 
 	--Find misspelled words & populate the WordLocations info.
-	Misspelled:CheckLine(newText, editbox)
+	Misspelled:CheckLine(workingText, editbox)
 
 	local colorCodesAdded = 0
-	--Use the WordLocation info to march backwards through the input text,
-	--highlighting misspellings
-	--tprint(WordLocations)
-	local w
-	for x = #WordLocations[editbox:GetName()], 1, -1 do
-		w = WordLocations[editbox:GetName()][x]
-		if WordCache[w.Word].Correct == false then
-			--Insert highlighting
-			newText = string_sub(newText, 1, w.StartPos -1) .. SPELLED_WRONG_HIGHLIGHT .. string_sub(newText, w.StartPos, w.EndPos) .. FONT_COLOR_CODE_CLOSE .. string_sub(newText, w.EndPos + 1)
 
-			--Adjust cursor position if the cursor was to the right of the first char in the word we're highlighting.
-			if newCPos >= w.EndPos then
-				newCPos = newCPos + #SPELLED_WRONG_HIGHLIGHT + #FONT_COLOR_CODE_CLOSE
-			elseif newCPos >= w.StartPos then
-				newCPos = newCPos + #SPELLED_WRONG_HIGHLIGHT
-			end
+	local beforeByteCursorPos = editbox:GetCursorPosition()
+	local addedAfterCursor = 0
 
-			colorCodesAdded = colorCodesAdded + 1
-			if colorCodesAdded >= MaxColorCodes then 
-				--Truncate WordLocations to here, because there are too many misspelled words.
-				--The WoW chatbox won't let us add more than so many color coded sections.
-				
-				--Delete all entries before x
-				WordLocations[editbox:GetName()] = { unpack( WordLocations[editbox:GetName()], x ) }
-				
-				break
-			end
-		end
-	end
+	--Use the WordLocation info to march backwards through the words in the editbox text,
+	--highlighting misspellings by adding color tags
+    for i = #WordPositions[editbox:GetName()], 1, -1 do
+        local w = WordPositions[editbox:GetName()][i]
+        if WordCache[w.Word].Correct == false then
+			-- Insert color tag to highlight the misspelled word
+            workingText = string_sub(workingText, 1, w.StartPos - 1)
+                .. SPELLED_WRONG_HIGHLIGHT
+                .. string_sub(workingText, w.StartPos, w.EndPos)
+                .. FONT_COLOR_CODE_CLOSE
+                .. string_sub(workingText, w.EndPos + 1)
 
-	--Adjust the word's WordLocation StartPos and EndPos, wherever we added highlighting.
-	--The right click handler uses this position info. to detect the misspelled word that was right clicked.
-	--March forward this time
-	local n = 0 --NewCharsAddedCounter
-	for x = 1, #WordLocations[editbox:GetName()] do
-		w = WordLocations[editbox:GetName()][x]
-		if WordCache[w.Word].Correct == false then
-			w.StartPos = w.StartPos + n + #SPELLED_WRONG_HIGHLIGHT
-			n = n + #SPELLED_WRONG_HIGHLIGHT
-			w.EndPos = w.EndPos + n
-			n = n + #FONT_COLOR_CODE_CLOSE
-		end
-	end
+			-- Adjust cursor position if the cursor was to the right of the first char in the word we're highlighting.
+            if beforeByteCursorPos >= w.EndPos then
+                addedAfterCursor = addedAfterCursor + #SPELLED_WRONG_HIGHLIGHT + #FONT_COLOR_CODE_CLOSE
+            elseif beforeByteCursorPos >= w.StartPos then
+                addedAfterCursor = addedAfterCursor + #SPELLED_WRONG_HIGHLIGHT
+            end
 
-	if newText ~= editboxText then
+            colorCodesAdded = colorCodesAdded + 1
+			--The WoW chatbox won't let us add more than so many color coded sections.
+            if colorCodesAdded >= MaxColorCodes then break end
+        end
+    end
+
+    -- Adjust WordLocation indexes for right-click detection
+	-- Adjust the word's WordLocation StartPos and EndPos, wherever we added highlighting.
+	-- The right click handler uses this position info. to detect the misspelled word that was right clicked.
+    local extra = 0
+    for _, w in ipairs(WordPositions[editbox:GetName()]) do
+        if WordCache[w.Word].Correct == false then
+            w.StartPos = w.StartPos + extra + #SPELLED_WRONG_HIGHLIGHT
+            extra = extra + #SPELLED_WRONG_HIGHLIGHT
+            w.EndPos = w.EndPos + extra
+            extra = extra + #FONT_COLOR_CODE_CLOSE
+        end
+    end
+
+	-- Update the editbox text with our misspelled word highlighting changes
+    if workingText ~= originalText then
 		--When we call settext, an OnSetText event will fire.
 		--Execution of this event should be skipped to avoid SpellCheckChat from running twice.
-		--Use a local toggle to skip this second firing
 		SkipOnTextChanged = true
-		editbox:SetText(newText)
+		editbox:SetText(workingText)
 
+		-- Set the cursor position
 		-- Convert UTF-8 char offset to byte offset for SetCursorPosition
-        local bytePos = string.utf8charpos_to_bytepos(newText, newCPos)
-        editbox:SetCursorPosition(bytePos)
+        --local byteCursorPos = string.utf8charpos_to_bytepos(workingText, workingCursorCharPos)
+     	local newCursorBytePos = beforeByteCursorPos + addedAfterCursor
+        Misspelled.DebugPrint("SpellCheckChat - 2: SetText, beforeCursBPos: "..beforeByteCursorPos..", addedAftCursor: "..addedAfterCursor.." , newCurBPos: "..newCursorBytePos)
+		editbox:SetCursorPosition(newCursorBytePos)
 	end
 end
 
@@ -564,10 +566,12 @@ end
 --Trim the WordCache table if it's grown very large
 function Misspelled:CheckLine(text, editbox)
 	--Reset the info on where each word is located
-	WordLocations[editbox:GetName()] = {}
+	WordPositions[editbox:GetName()] = {}
 
 	if text == nil then return end
 	if strlenutf8(text) == 0 then return end
+
+	local editbox_frameName = editbox:GetName()
 
 	--Find if there are any WoW UI escape sequences on this line, and replace them with # chars, 
 	--so they don't match as words in the next stage of parsing and get ignored for spellchecking.
@@ -612,37 +616,39 @@ function Misspelled:CheckLine(text, editbox)
 
 	local x = 0
 	local word
-	local correct
+	local isInWordDict
 	while matchPosStart ~= nil do
 		word = string_sub(newText, matchPosStart, matchPosEnd)
 
-		--ignore all uppercase words
+		--ignore words all in UPPERCASE
 		if word ~= string_upper(word) then
 			--ignore words with numbers in them
 			if string_match(word, "[%d]") == nil then
 				x = x + 1
-				WordLocations[editbox:GetName()][x] = {["Word"] = word, ["StartPos"] = matchPosStart, ["EndPos"] = matchPosEnd}
+				WordPositions[editbox:GetName()][x] = {["Word"] = word, ["StartPos"] = matchPosStart, ["EndPos"] = matchPosEnd}
 
+				-- Populate the WordCache with the word and if it exists in the current dictionary: isInWordDict = true/false.
+                -- Correct spellings will be added to the cache under the Suggestions {} table when right-clicking the word.
 				if WordCache[word] == nil then
-					correct = false
+					isInWordDict = false
 
 					--Ignore words in all upper case
 					if word == string_upper(word) then
-						correct = true
+						isInWordDict = true
 					end
 
 					--See if the dictionary contains the word
-					if correct == false then
-						correct = WordDict:Contains(word)
+					if isInWordDict == false then
+						isInWordDict = WordDict:Contains(word)
 					end
 
 					--Try the lower case version of the word
-					if correct == false then
-						correct = WordDict:Contains(string_lower(word))
+					if isInWordDict == false then
+						isInWordDict = WordDict:Contains(string_lower(word))
 					end
 
 					--Cache the results
-					WordCache[word] = {["Correct"] = correct} --, ["Suggestions"] = {}}
+					WordCache[word] = {["Correct"] = isInWordDict} --, ["Suggestions"] = {}}
 					WordCacheCount = WordCacheCount + 1
 					--Changed to delay searching for suggestions until someone right-clicks on a misspelled word.
 					--Adding UTF8 support slows the suggestion generation.
@@ -685,17 +691,30 @@ end
 --It's possible that a recent edit has started to destroy the color tags, either at the
 --beginning or end of a highlighted misspelled word.
 --Attempt to detect this and remove any dangling colored text tags.
-function Misspelled:RemoveHighlighting(text, currentUTF8CursorPosition)
+---comment
+---@param text string
+---@param currentByteCursorPosition? integer
+---@return string cleanedText #text with highlighting color tages removed
+---@return integer afterByteCursorPosition #currentByteCursorPosition adjusted by the number of bytes removed to the left of the cursor position given.
+function Misspelled:RemoveHighlighting(text, currentByteCursorPosition)
 	-- \124 is the ASCII code for the pipe '|' character.
 	--Misspelled:AddToInspector(string_gsub(text, "\124", "\124\124"), "RemoveHighlighting-input")
 	--Blizzard uses string.gsub(textString, "[|]", "||"), in the /dump source code 
 	
-	local cleanedChatMessage
-	local newText = text
+    if not text or text == "" then
+        return text, currentByteCursorPosition or 0
+    end
 
-	--Used to return the number of UICinematic escape sequence/highlighting characters removed from, before current cursor position.
-	local cPos
-	cPos = currentCursorPosition or 0
+	-- Default cursor char position (in UTF-8 characters)
+    currentByteCursorPosition = currentByteCursorPosition or strlen(text)
+
+	-- Track adjustment for removed bytes before the cursor
+    local removedBeforeCursor = 0
+
+	local beforeByteLen = strlen(text)
+	local beforeByteCursorPos = currentByteCursorPosition
+
+	local cleanedText = text
 
 	local itemLinks = {}
 	local itemLink
@@ -706,14 +725,16 @@ function Misspelled:RemoveHighlighting(text, currentUTF8CursorPosition)
 	local tempToken
 	local tempText
 	
+    -- Strategy: Replace expected UI escape sequences that exist in the 
+
 	--Try and match Global Colors text. (|cncolorname:text|r)
 	--Use a non-greedy match character (-) in the match pattern rather than a greed match character (*)
 	patt = "(|cn[^:]+:.-|r)"
-	matchPosStart, matchPosEnd = string_find(newText, patt)
+	matchPosStart, matchPosEnd = string_find(cleanedText, patt)
 
 	while matchPosStart ~= nil do
 		--Store the itemlink and it's relative position so it can be replaced latter
-		itemLink = string_sub(newText, matchPosStart, matchPosEnd)
+		itemLink = string_sub(cleanedText, matchPosStart, matchPosEnd)
 		itemLinks[itemLinkNum] = itemLink
 
 		tokenSize = #itemLink
@@ -721,20 +742,20 @@ function Misspelled:RemoveHighlighting(text, currentUTF8CursorPosition)
 		tempToken = tempToken .. string_rep(">", tokenSize - #tempToken - 1) .. "}"
 
 		--Replace this itemlink with a temporary placeholder code
-		newText = string_gsub(newText, patt, tempToken, 1)
+		cleanedText = string_gsub(cleanedText, patt, tempToken, 1)
 
 		itemLinkNum = itemLinkNum + 1
-		matchPosStart, matchPosEnd = string_find(newText, patt)
+		matchPosStart, matchPosEnd = string_find(cleanedText, patt)
 	end
 
 	--Try and match (IQn) Item Quality Colors text. (|cnIQn:text|r)
 	--Use a non-greedy match character (-) in the match pattern rather than a greed match character (*)
 	patt = "(|cnIQ%d:.-|r)"
-	matchPosStart, matchPosEnd = string_find(newText, patt)
+	matchPosStart, matchPosEnd = string_find(cleanedText, patt)
 
 	while matchPosStart ~= nil do
 		--Store the itemlink and it's relative position so it can be replaced latter
-		itemLink = string_sub(newText, matchPosStart, matchPosEnd)
+		itemLink = string_sub(cleanedText, matchPosStart, matchPosEnd)
 		itemLinks[itemLinkNum] = itemLink
 
 		tokenSize = #itemLink
@@ -742,19 +763,19 @@ function Misspelled:RemoveHighlighting(text, currentUTF8CursorPosition)
 		tempToken = tempToken .. string_rep(">", tokenSize - #tempToken - 1) .. "}"
 
 		--Replace this itemlink with a temporary placeholder code
-		newText = string_gsub(newText, patt, tempToken, 1)
+		cleanedText = string_gsub(cleanedText, patt, tempToken, 1)
 
 		itemLinkNum = itemLinkNum + 1
-		matchPosStart, matchPosEnd = string_find(newText, patt)
+		matchPosStart, matchPosEnd = string_find(cleanedText, patt)
 	end
 
 	--Try and match Hex code colored Item links.  The Addon GHI (Gryphonheart Items) colors links with a capitol C, non-standard.
 	patt = "|[Cc]%x+|H.-|h.-|h|r"
-	matchPosStart, matchPosEnd = string_find(newText, patt)
+	matchPosStart, matchPosEnd = string_find(cleanedText, patt)
 
 	while matchPosStart ~= nil do
 		--Store the itemlink and it's relative position so it can be replaced latter
-		itemLink = string_sub(newText, matchPosStart, matchPosEnd)
+		itemLink = string_sub(cleanedText, matchPosStart, matchPosEnd)
 		itemLinks[itemLinkNum] = itemLink
 
 		tokenSize = #itemLink
@@ -762,19 +783,19 @@ function Misspelled:RemoveHighlighting(text, currentUTF8CursorPosition)
 		tempToken = tempToken .. string_rep(">", tokenSize - #tempToken - 1) .. "}"
 
 		--Replace this itemlink with a temporary placeholder code
-		newText = string_gsub(newText, patt, tempToken, 1)
+		cleanedText = string_gsub(cleanedText, patt, tempToken, 1)
 
 		itemLinkNum = itemLinkNum + 1
-		matchPosStart, matchPosEnd = string_find(newText, patt)
+		matchPosStart, matchPosEnd = string_find(cleanedText, patt)
 	end
 
 	--Try to match, non-colored Item Links
 	patt = "|H.-|h"
-	matchPosStart, matchPosEnd = string_find(newText, patt)
+	matchPosStart, matchPosEnd = string_find(cleanedText, patt)
 
 	while matchPosStart ~= nil do
 		--Store the itemlink and it's relative position so it can be replaced latter
-		itemLink = string_sub(newText, matchPosStart, matchPosEnd)
+		itemLink = string_sub(cleanedText, matchPosStart, matchPosEnd)
 		itemLinks[itemLinkNum] = itemLink
 
 		tokenSize = #itemLink
@@ -782,19 +803,19 @@ function Misspelled:RemoveHighlighting(text, currentUTF8CursorPosition)
 		tempToken = tempToken .. string_rep(">", tokenSize - #tempToken - 1) .. "}"
 
 		--Replace this itemlink with a temporary placeholder code
-		newText = string_gsub(newText, patt, tempToken, 1)
+		cleanedText = string_gsub(cleanedText, patt, tempToken, 1)
 
 		itemLinkNum = itemLinkNum + 1
-		matchPosStart, matchPosEnd = string_find(newText, patt)
+		matchPosStart, matchPosEnd = string_find(cleanedText, patt)
 	end
 
 	--Try to match and textures links.  (i.e. Raid targets and there used when chatting with a GM)
 	patt = "|T.-|t"
-	matchPosStart, matchPosEnd = string_find(newText, patt)
+	matchPosStart, matchPosEnd = string_find(cleanedText, patt)
 
 	while matchPosStart ~= nil do
 		--Store the itemlink and it's relative position so it can be replaced latter
-		itemLink = string_sub(newText, matchPosStart, matchPosEnd)
+		itemLink = string_sub(cleanedText, matchPosStart, matchPosEnd)
 		itemLinks[itemLinkNum] = itemLink
 
 		tokenSize = #itemLink
@@ -802,10 +823,10 @@ function Misspelled:RemoveHighlighting(text, currentUTF8CursorPosition)
 		tempToken = tempToken .. string_rep(">", tokenSize - #tempToken - 1) .. "}"
 
 		--Replace this itemlink with a temporary placeholder code
-		newText = string_gsub(newText, patt, tempToken, 1)
+		cleanedText = string_gsub(cleanedText, patt, tempToken, 1)
 
 		itemLinkNum = itemLinkNum + 1
-		matchPosStart, matchPosEnd = string_find(newText, patt)
+		matchPosStart, matchPosEnd = string_find(cleanedText, patt)
 	end
 
 
@@ -816,89 +837,101 @@ function Misspelled:RemoveHighlighting(text, currentUTF8CursorPosition)
 	--If the cursorPosition is in the middle of a highlighted word, there
 	patt = SPELLED_WRONG_HIGHLIGHT .. "(.-)|r"
 
-	matchPosStart, matchPosEnd = string_find(newText, patt)
+	matchPosStart, matchPosEnd = string_find(cleanedText, patt)
 
-	Misspelled:AddToInspector({_patt=string_gsub(patt,"[|]","||"),_newText=string_gsub(newText,"[|]","||"),_matchPosStart=matchPosStart,_matchPosEnd=matchPosEnd},"RemoveHighlighting string.find misspelled highlighting")
+	Misspelled:AddToInspector({_patt=string_gsub(patt,"[|]","||"),_newText=string_gsub(cleanedText,"[|]","||"),_matchPosStart=matchPosStart,_matchPosEnd=matchPosEnd},"RemoveHighlighting string.find misspelled highlighting")
 
 	while matchPosStart ~= nil do
-		--strings.gsub(input, pattern, replaceText, n=limit the number of substations to be made)
-		--tempText = string_gsub(newText, patt, "%1", 1)
+		-- ref-doc: strings.gsub(input, pattern, replaceText, n=limit the number of substations to be made)
+		-- --tempText = string_gsub(newText, patt, "%1", 1)
 		-- "%1" is known to have some edge cases where it will fail with some byte sequences (UTF8).  The function below is a potential workaround.
-		tempText = string_gsub(newText, patt, function(x) return x end, 1)
+		
+		-- --cleanedText = string_gsub(cleanedText, patt, function(x) return x end, 1)
 
-		local charsRemoved = 0
-		charsRemoved = strlenutf8(newText) - strlenutf8(tempText)
-		if charsRemoved ~= 0 then
-			--If the cursorPosition is before the highlighted word, don't adjust.
-			if cPos < matchPosStart then
-				cPos = cPos
-			else
-				--If the cursor was after of the start of the highlighted word, subtract the num of deleted chars from the cursor position
-				if cPos >= matchPosStart then
-					cPos = cPos - charsRemoved
-				end
-				--If the cursor was in the middle of the highlighted word, add 2, because "|r" was in the newText after the cursorPosition and those 2 deleted characters got added to charsRemoved.
-				if cPos >= matchPosStart and cPos < matchPosEnd then
-					cPos = cPos + 2
-				end
-			end	
+		tempText = string_gsub(cleanedText, patt, function(x) return x end, 1)
+
+		local bytesRemoved = 0
+		bytesRemoved = strlen(cleanedText) - strlen(tempText)
+		if bytesRemoved ~= 0 then
+			--If the cursorPosition is before the highlighted word, don't adjust the cursor position.
+			--If the cursor was after of the start of the highlighted word, subtract the num of deleted chars from the cursor position
+			if beforeByteCursorPos >= matchPosStart then
+				removedBeforeCursor	= removedBeforeCursor + bytesRemoved
+			end
+			-- If the cursor was in the middle of the highlighted word, subtract 2, because "|r" was in the newText after the cursorPosition 
+			-- and those 2 deleted characters got added to removedBeforeCursor, in the previous if clause block.
+			if beforeByteCursorPos >= matchPosStart and beforeByteCursorPos < matchPosEnd then
+				removedBeforeCursor = removedBeforeCursor - 2
+			end
 		end
-		newText = tempText
 
-		matchPosStart, matchPosEnd = string_find(newText, patt)
+		cleanedText = tempText
+
+		matchPosStart, matchPosEnd = string_find(cleanedText, patt)
 	end
 
 	--Remove any remaining orphaned beginning color tags.
 	patt = "|[Cc]%x%x%x%x%x%x%x%x"
-	matchPosStart, matchPosEnd = string_find(newText, patt)
+	matchPosStart, matchPosEnd = string_find(cleanedText, patt)
 	while matchPosStart ~= nil do
-		tempText = string_gsub(newText, patt, "", 1)
+		tempText = string_gsub(cleanedText, patt, "", 1)
 
-		if #newText - #tempText ~= 0 then
+		local bytesRemoved = 0
+		bytesRemoved = strlen(cleanedText) - strlen(tempText)
+		if bytesRemoved ~= 0 then
 			--If the cursor was to the right of the start, subtract the num of deleted chars from the cursor position
-			if cPos >= matchPosStart then
-				cPos = cPos - (#newText - #tempText)
+			if beforeByteCursorPos >= matchPosStart then
+				removedBeforeCursor = removedBeforeCursor + bytesRemoved
 			end
 		end
-		newText = tempText
+		
+		cleanedText = tempText
 
-		matchPosStart, matchPosEnd = string_find(newText, patt)
+		matchPosStart, matchPosEnd = string_find(cleanedText, patt)
 	end
 
 	--Remove any remaining orphaned ending color tags.
 	patt = "|r"
-	matchPosStart, matchPosEnd = string_find(newText, patt)
+	matchPosStart, matchPosEnd = string_find(cleanedText, patt)
 	while matchPosStart ~= nil do
-		tempText = string_gsub(newText, patt, "", 1)
+		tempText = string_gsub(cleanedText, patt, "", 1)
 
-		if #newText - #tempText ~= 0 then
+		local bytesRemoved = 0
+		bytesRemoved = strlen(cleanedText) - strlen(tempText)
+		if bytesRemoved ~= 0 then
 			--If the cursor was to the right of the start, subtract the num of deleted chars from the cursor position
-			if cPos >= matchPosStart then
-				cPos = cPos - (#newText - #tempText)
+			if beforeByteCursorPos >= matchPosStart then
+				removedBeforeCursor = removedBeforeCursor + bytesRemoved
 			end
 		end
-		newText = tempText
 
-		matchPosStart, matchPosEnd = string_find(newText, patt)
+		cleanedText = tempText
+
+		matchPosStart, matchPosEnd = string_find(cleanedText, patt)
 	end
 
 	--Replace back the escape sequences extracted
 	if #itemLinks > 0 then
 		for i,val in ipairs(itemLinks) do
-			newText = string_gsub(newText, "{<<" .. tostring(i) .. ">-}", val)
+			cleanedText = string_gsub(cleanedText, "{<<" .. tostring(i) .. ">-}", val)
 		end
 	end
 
 
-	--If by chance the tracked cursor position went negative, set it to 0
-	if cPos < 0 then
-		cPos = 0
-	end
+	-- --If by chance the tracked cursor position went negative, set it to 0
+	-- if cPos < 0 then
+	-- 	cPos = 0
+	-- end
 
 	
-	cleanedChatMessage = newText
-	--cPos should never be > #newText, unless there's some unfound error above
-	return cleanedChatMessage, cPos
+	-- cleanedChatMessage = workingText
+	-- --cPos should never be > #newText, unless there's some unfound error above
+	-- return cleanedChatMessage, cPos
+
+    local newCursorBytePos = beforeByteCursorPos - removedBeforeCursor
+    if newCursorBytePos < 1 then newCursorBytePos = 0 end
+    
+	return cleanedText, newCursorBytePos
 end
 
 -------------------------------------------------------------------------
@@ -913,8 +946,8 @@ function Misspelled:OnMouseUp(editbox, button)
 
 		--check if we are positioned on a misspelled word
 		local pos = editbox:GetUTF8CursorPosition()
-		if WordLocations[editbox:GetName()] ~= nil then
-			for i, w in ipairs(WordLocations[editbox:GetName()]) do
+		if WordPositions[editbox:GetName()] ~= nil then
+			for i, w in ipairs(WordPositions[editbox:GetName()]) do
 				if	pos >= w.StartPos and pos <= w.EndPos then
 					if WordCache[w.Word].Correct == false then
 						--If not cached, lookup Suggestions for the misspelled word

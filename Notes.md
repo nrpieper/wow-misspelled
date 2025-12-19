@@ -1,7 +1,12 @@
 # Notes
+### Lua Annotations
+https://luals.github.io/wiki/annotations/
 
 ### Tests
 Run tests with the WowLua addon and call: `Misspelled.Tests:RunTests()`, to run all tests.
+
+### To-Do
+WordPositions should be in UTF8 position or byte poistion.
 
 ### Bugs
 Issue: Fix euro € symbol causing the whole line to be highlighted as misspelled.
