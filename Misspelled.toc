@@ -1,8 +1,8 @@
-﻿## Interface: 110200
-## Interface-Classic: 11507
+﻿## Interface: 110207
+## Interface-Classic: 11508
 ## Interface-Wrath: 30405
 ## Interface-Cata: 40402
-## Interface-Mists: 50500
+## Interface-Mists: 50501
 
 ## X-Curse-Project-ID: 19114
 ## X-Curse-Project-Name: Misspelled - Chat Spellchecker

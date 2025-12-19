@@ -91,6 +91,7 @@ User Dictionary Editor Added
 (9/7/2019) - Wow Classic: When starting you can't have friends and the global function: GetNumFriends() is nil.  Detect and skip to eliminate the error.
 
 (4/30/2025) - Changes added to RemoveHighlighting to parse new Item Quality # colors and Global Colors UI escape sequences.
+(12/18/2025) - Wow Retail 12.2.7 changes added to hook chat frames.
 --]]--
 
 local _G = _G
@@ -218,26 +219,36 @@ function Misspelled:OnInitialize()
 	--GuildRoster()
 
 	--Patch 3.5 has multiple ChatEditBoxes.  We need to hook in differently.
+	--Updated for WoW 11.2.7: ChatEdit_ActivateChat exists but is never called.
+	--Force the new timer-based approach.
+
+	-- Use timer-based approach for 11.2.7+
+	local self = Misspelled
+	C_Timer.After(0.1, function()
+		local n = _G.NUM_CHAT_WINDOWS or 10
+		for i = 1, n do
+			local editbox = _G["ChatFrame" .. i .. "EditBox"]
+			if editbox then
+				local hooked = self:IsHooked(editbox, "OnTextChanged")
+				if not hooked then
+					self:WireUpEditBox(editbox)
+				end
+			end
+		end
+	end)
+
 	if ChatEdit_ActivateChat ~= nil then
-		Misspelled:RawHook("ChatEdit_ActivateChat", true)
-	else
+		Misspelled:SecureHook("ChatEdit_ActivateChat")
+	elseif ChatFrameEditBox ~= nil then
 		Misspelled:WireUpEditBox(ChatFrameEditBox)
 	end
 
-
 	-- hooks for removing any misspelled word highlighting in the text before the chat message is sent
 	-- The Wow client will disconnect if you attempt to send a color tags in a chat message.
-	local gameType = "Unknown"
-	if WOW_PROJECT_ID ~= nil then
-		if WOW_PROJECT_ID == WOW_PROJECT_MAINLINE then
-			gameType = "MAINLINE"
-		end
-	end
-
-	if gameType == "MAINLINE" then
-	      Misspelled:RawHook(C_ChatInfo,"SendChatMessage", Misspelled.SendChatMessage, true)
+	if C_ChatInfo and C_ChatInfo.SendChatMessage then
+		Misspelled:RawHook(C_ChatInfo, "SendChatMessage", Misspelled.SendChatMessage, true)
 	else
-          Misspelled:RawHook("SendChatMessage", Misspelled.SendChatMessage, true)
+		Misspelled:RawHook("SendChatMessage", Misspelled.SendChatMessage, true) -- For non-retail game clients
 	end
 end
 
@@ -1540,7 +1551,7 @@ function Misspelled:CreateInterfaceOptions()
 			Misspelled_cfgDictitIT:Enable()
 			if Misspelled_DB.LoadDictionary == nil or #Misspelled_DB.LoadDictionary == 0 then
 				Misspelled_DB.LoadDictionary = "enUS"
-				Misspelled_cfgDictenUS:setChecked(true)
+				Misspelled_cfgDictenUS:SetChecked(true)
 			end
 		end
 	end)
