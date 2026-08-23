@@ -98,7 +98,9 @@ User Dictionary Editor Added
               (2) calling editbox:SetText from addon code taints the box, so the tainted text was
               blocked on the next message. While restricted we now remove the send hook, never add
               highlighting, and never SetText the edit box (see UpdateChatRestriction / SpellCheckChat /
-              EditBox_OnEnterPressed), keeping the chat send path fully untainted.
+              EditBox_OnEnterPressed), keeping the chat send path fully untainted. "Restricted" covers
+              instanced content and instance/LFG groups (LFR, LFD, Mythic+, random BG/arena), which are
+              restricted even before you physically zone in (see IsChatRestrictedInstance).
 --]]--
 
 local _G = _G
@@ -257,8 +259,9 @@ function Misspelled:OnInitialize()
 	-- (and disables highlighting so nothing dirty is ever sent), and restores it everywhere else.
 	Misspelled:UpdateChatRestriction()
 
-	--Keep the restriction state in sync as the player zones in/out of instances and starts a keystone.
+	--Keep the restriction state in sync as the player zones, joins/leaves a group, or starts a keystone.
 	Misspelled:RegisterEvent("PLAYER_ENTERING_WORLD")
+	Misspelled:RegisterEvent("GROUP_ROSTER_UPDATE")
 	if C_ChallengeMode then
 		Misspelled:RegisterEvent("CHALLENGE_MODE_START")
 		Misspelled:RegisterEvent("CHALLENGE_MODE_COMPLETED")
@@ -273,8 +276,14 @@ end
 -- chat editbox stays clean and the send path stays fully secure/untainted. Everywhere else the addon
 -- behaves exactly as before.
 
---Returns true in instances where Blizzard blocks addons from altering/sending chat text.
+--Returns true in contexts where Blizzard blocks addons from altering/sending chat text.
 function Misspelled:IsChatRestrictedInstance()
+	--Instance/LFG groups (LFR, LFD, Mythic+, random BG/arena) restrict chat even before you have
+	--physically zoned in, so IsInInstance alone is not enough -- a raid group forming up in a city
+	--still gets ADDON_ACTION_BLOCKED. Treat any instance-category group as restricted.
+	if IsInGroup and LE_PARTY_CATEGORY_INSTANCE and IsInGroup(LE_PARTY_CATEGORY_INSTANCE) then
+		return true
+	end
 	local _, instanceType = IsInInstance()
 	if instanceType == "raid" or instanceType == "pvp" or instanceType == "arena" then
 		return true
@@ -318,6 +327,10 @@ function Misspelled:UpdateChatRestriction()
 end
 
 function Misspelled:PLAYER_ENTERING_WORLD()
+	Misspelled:UpdateChatRestriction()
+end
+
+function Misspelled:GROUP_ROSTER_UPDATE()
 	Misspelled:UpdateChatRestriction()
 end
 
