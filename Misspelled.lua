@@ -101,6 +101,9 @@ User Dictionary Editor Added
               EditBox_OnEnterPressed), keeping the chat send path fully untainted. "Restricted" covers
               instanced content and instance/LFG groups (LFR, LFD, Mythic+, random BG/arena), which are
               restricted even before you physically zone in (see IsChatRestrictedInstance).
+              The send wrapper is now installed/removed by direct assignment instead of AceHook (see
+              SetChatSendHook): repeatedly RawHook/Unhook-ing the secure send across those boundaries
+              could leave AceHook half-restored and silently drop outgoing messages.
 --]]--
 
 local _G = _G
@@ -296,21 +299,32 @@ function Misspelled:IsChatRestrictedInstance()
 	return false
 end
 
---Install or remove the SendChatMessage RawHook, guarding against a double hook/unhook.
+--Install or remove our SendChatMessage wrapper. This is managed manually (by direct assignment) rather
+--than through AceHook: the player crosses restricted-instance boundaries constantly, and repeatedly
+--RawHook/Unhook-ing a secure function can leave AceHook in a half-restored state that silently drops
+--the outgoing message (no error). Direct assignment is deterministic. We only ever restore the function
+--when our wrapper is still the live value, so we never clobber a hook another addon installed on top.
 function Misspelled:SetChatSendHook(enable)
-	if C_ChatInfo and C_ChatInfo.SendChatMessage then
-		local hooked = Misspelled:IsHooked(C_ChatInfo, "SendChatMessage")
-		if enable and not hooked then
-			Misspelled:RawHook(C_ChatInfo, "SendChatMessage", Misspelled.SendChatMessage, true)
-		elseif not enable and hooked then
-			Misspelled:Unhook(C_ChatInfo, "SendChatMessage")
+	local useC = (C_ChatInfo and C_ChatInfo.SendChatMessage ~= nil)
+	local current = useC and C_ChatInfo.SendChatMessage or _G.SendChatMessage
+
+	if enable then
+		if current ~= Misspelled.SendChatMessage then
+			--Capture whatever send function is currently live so our wrapper can forward to it.
+			Misspelled.realSendChatMessage = current
+			if useC then
+				C_ChatInfo.SendChatMessage = Misspelled.SendChatMessage
+			else
+				_G.SendChatMessage = Misspelled.SendChatMessage -- For non-retail game clients
+			end
 		end
 	else
-		local hooked = Misspelled:IsHooked("SendChatMessage")
-		if enable and not hooked then
-			Misspelled:RawHook("SendChatMessage", Misspelled.SendChatMessage, true) -- For non-retail game clients
-		elseif not enable and hooked then
-			Misspelled:Unhook("SendChatMessage")
+		if current == Misspelled.SendChatMessage and Misspelled.realSendChatMessage then
+			if useC then
+				C_ChatInfo.SendChatMessage = Misspelled.realSendChatMessage
+			else
+				_G.SendChatMessage = Misspelled.realSendChatMessage
+			end
 		end
 	end
 end
@@ -407,25 +421,17 @@ end
 --Before a chat message is sent, remove any highlighting that Misspelled might have added.
 --The Wow client will disconnect if you attempt to send Hex code colored text in a chat message.
 function Misspelled.SendChatMessage(message, chatType, languageID, target, ...)
-	local cleanedMessage = Misspelled:RemoveHighlighting(message)
-
-	--On DEBUG only
-	--Misspelled:AddToInspector(cleanedMessage, "Misspelled:SendChatMessage - gotMessage")
-	
-	--self.hooks[C_ChatInfo]["SendChatMessage"](cleanedMessage, chatType, languageID, target, ...)
-	local gameType = "Unknown"
-
-	if WOW_PROJECT_ID ~= nil then
-		if WOW_PROJECT_ID == WOW_PROJECT_MAINLINE then
-			gameType = "MAINLINE"
-
-		end
+	--Guard the parse with pcall so a highlighting-removal error can never silently swallow the player's
+	--message -- if it fails for any reason, fall back to sending the original text unchanged.
+	local ok, cleanedMessage = pcall(Misspelled.RemoveHighlighting, Misspelled, message)
+	if not ok or cleanedMessage == nil then
+		cleanedMessage = message
 	end
 
-	if gameType == "MAINLINE" then
-		Misspelled.hooks[C_ChatInfo]["SendChatMessage"](cleanedMessage, chatType, languageID, target, ...)
-	else
-        Misspelled.hooks["SendChatMessage"](cleanedMessage, chatType, languageID, target, ...)
+	--Forward to the real send function captured in SetChatSendHook (either C_ChatInfo.SendChatMessage on
+	--retail or the global SendChatMessage on older clients).
+	if Misspelled.realSendChatMessage then
+		return Misspelled.realSendChatMessage(cleanedMessage, chatType, languageID, target, ...)
 	end
 end
 
