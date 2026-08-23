@@ -93,9 +93,12 @@ User Dictionary Editor Added
 (4/30/2025) - Changes added to RemoveHighlighting to parse new Item Quality # colors and Global Colors UI escape sequences.
 (12/18/2025) - Wow Retail 12.2.7 changes added to hook chat frames.
 (8/23/2026) - Fixed ADDON_ACTION_BLOCKED when sending chat in Mythic+, raids, and instanced PvP.
-              Blizzard now protects SendChatMessage in those instances; Misspelled's RawHook on it
-              tainted the call and got blocked. The send hook and highlighting are now disabled inside
-              those instances (see UpdateChatRestriction), keeping the chat send path fully untainted.
+              Blizzard now protects SendChatMessage in those instances. Two things tainted the send
+              there: (1) our RawHook on SendChatMessage put insecure code in the call path, and
+              (2) calling editbox:SetText from addon code taints the box, so the tainted text was
+              blocked on the next message. While restricted we now remove the send hook, never add
+              highlighting, and never SetText the edit box (see UpdateChatRestriction / SpellCheckChat /
+              EditBox_OnEnterPressed), keeping the chat send path fully untainted.
 --]]--
 
 local _G = _G
@@ -303,36 +306,15 @@ function Misspelled:SetChatSendHook(enable)
 	end
 end
 
---Strip any highlighting Misspelled already inserted into the open chat edit boxes.
-function Misspelled:ClearAllEditBoxHighlighting()
-	local n = _G.NUM_CHAT_WINDOWS or 10
-	for i = 1, n do
-		local editbox = _G["ChatFrame" .. i .. "EditBox"]
-		if editbox then
-			local text = editbox:GetText()
-			if text ~= nil and #text > 0 then
-				local cleaned, cpos = Misspelled:RemoveHighlighting(text, editbox:GetCursorPosition())
-				if cleaned ~= text then
-					SkipOnTextChanged = true
-					editbox:SetText(cleaned)
-					editbox:SetCursorPosition(cpos)
-				end
-			end
-		end
-	end
-end
-
 --Toggle Misspelled's chat interaction based on whether the current instance restricts chat edits.
 function Misspelled:UpdateChatRestriction()
 	local restricted = Misspelled:IsChatRestrictedInstance()
 	Misspelled.chatRestricted = restricted
-	if restricted then
-		--Remove ourselves from the outgoing chat path and clean up any highlighting already inserted.
-		Misspelled:SetChatSendHook(false)
-		Misspelled:ClearAllEditBoxHighlighting()
-	else
-		Misspelled:SetChatSendHook(true)
-	end
+	--Remove our send hook while restricted so the outgoing call stays untainted. We deliberately do
+	--NOT touch the edit box text here: an addon SetText would taint the box, and the protected
+	--SendChatMessage would then block the next message. Highlighting is simply never added while
+	--restricted (see SpellCheckChat), so the box stays clean on its own.
+	Misspelled:SetChatSendHook(not restricted)
 end
 
 function Misspelled:PLAYER_ENTERING_WORLD()
@@ -522,10 +504,17 @@ function Misspelled.EditBox_OnEnterPressed(editbox)
 	RightClickedWord = nil
 	WordLocations[editbox:GetName()] = {}
 
-	--before message is sent, remove and misspelled highlighting
-	local cleanedChatMessage = Misspelled:RemoveHighlighting(editbox:GetText())
+	--Strip any leftover highlighting from the box, but only if something actually needs removing.
+	--Calling SetText unconditionally taints the edit box, and in restricted instances (Mythic+, raids,
+	--instanced PvP) the protected SendChatMessage then blocks that tainted text on the next message
+	--(ADDON_ACTION_BLOCKED). Since we never add highlighting while restricted, RemoveHighlighting is a
+	--no-op there and no SetText happens, leaving the box untainted.
+	local text = editbox:GetText()
+	local cleanedChatMessage = Misspelled:RemoveHighlighting(text)
 	WordLocations[editbox:GetName()] = {}
-	editbox:SetText(cleanedChatMessage)
+	if cleanedChatMessage ~= text then
+		editbox:SetText(cleanedChatMessage)
+	end
 end
 
 
