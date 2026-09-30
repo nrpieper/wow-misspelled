@@ -16,62 +16,38 @@
 
 
 --[[
-Challenges:
+How Misspelled shows misspellings (rewritten 9/2026 for WoW Forever and Midnight)
 
+Misspelled used to highlight a misspelled word by inserting a color code into the chat edit box
+text (editbox:SetText), and hooked SendChatMessage to strip those codes out again before a
+message was sent. On the modern client (Midnight 12.x, and WoW Forever, which runs the same
+client) both of those taint Blizzard's chat code:
+ - C_ChatInfo.SendChatMessage is a restricted API. With the hook in place every message went
+   through addon code, so Blizzard blocked it (ADDON_ACTION_BLOCKED) whenever chat messaging
+   lockdown was active: boss encounters, Mythic+ and PvP matches.
+ - editbox:SetText from addon code runs Blizzard's OnTextChanged / ParseText under taint and
+   leaves the edit box tainted, so the next message or secure slash command (/cast, /target)
+   could be blocked too.
 
-Issue #1
-(http://www.wowwiki.com/ItemLink)
-Color tags can be destroyed or mangled as you perform edit near the start
-and end of the color tag.
+So Misspelled no longer changes the text you type and never hooks SendChatMessage. It reads
+the edit box text and draws an underline under each misspelled word on its own overlay frame.
+Nothing Blizzard runs is tainted, so spell checking keeps working in combat, boss encounters,
+Mythic+ and PvP.
 
-If you press delete with the cursor positioned, just before, a color tag,
-the start of the tag (|cffffffff) and the next character are removed.  The
-closing color tag (|r) is left at the end.
+The only time Misspelled writes to the edit box is when you pick a suggestion from the
+right-click menu. While any addon restriction is active (combat, encounter, Mythic+, PvP,
+chat lockdown) the suggestions are still listed but greyed out, and picking one does nothing,
+so the text you type is never touched. Ignore All and Add to Dictionary still work, since
+they don't change the text.
 
-If you press backspace with the cursor positioned just past the (|r) end
-of a color tag, the (|r) is removed along with the character just before it.
+Where the words are:
+The overlay has to know where each word is drawn. Widths come from a hidden FontString that
+uses the edit box's font. A single line EditBox scrolls sideways to keep the caret visible and
+there is no API for that scroll offset, so ComputeScroll follows it from the caret position.
 
-If you press delete with the cursor positioned, just before the last char,
-in a color tagged string, the character and the closing (|r) are both removed.
-
-If you press backspace with the cursor positioned, just after the first char,
-in a color tagged string, the first char and the beginning color tag are both removed.
-
-In the case of colored item links, Wow just deletes the entire item, if you
-hit a delete or backspace.
-
-Solution:
-First parse the line to flag any valid item links or textures so they don't get
-destroyed by the next step.
-Then if there are any remaining start or end color tag, remove them.
-
-Issue #2
-The Chat Edit box's edit cursor position is relative to characters that don't display in the
-chat edit text, i.e. item link tags, color tags, and texture tags.
-When we add, or remove, a color tag, to highlight a misspelled word,  we should adjust the
-cursor position so it acts natural.
-Note: An OnCursorChanged event doesn't exist or doesn't fire for the ChatEditBox.
-
-Solution:
-Methods that insert or delete text from the ChatEditBox need to properly adjust the cursor
-position as needed when, visible or hidden, characters are inserted or deleted to the left of the cursor.
-
-Two techniques could be used.
-#1: Track the number of, printable and non-printable characters inserted or deleted
-    to the left of the cursor, and adjust the cursor position to compensate.
-
-#2: Insert a tracking char byte (example: \1), at the cursor position.  After making
-	inserts and deletes, find the tracking char byte, remove it and reposition the cursor
-    at its location.
-
-I have implemented technique #1.
-
-Issue #3 WIM Integration
-Wim allows multiple chat windows at once.  So we need to track WordLocations per editbox.
-Wim breaks long chat messages into multiple messages.
-Wim has a EditBox right click handler to insert emoticons and previous chat messages.
-WIM sends chat messages using ChatThrottleLib:SendChatMessage.  This can hot SendChatMessage before Misspelled and bypasses the step that cleans the highlighting.
-(10/10/2009) Updated hooks, from WIM, will be provided via WIM.RegisterPreSendFilterText(func()), to remove the need to manually hook ChatThrottleLib
+WIM Integration
+Wim allows multiple chat windows at once, so state is kept per edit box.
+Wim notifies us of text changes via WIM.RegisterWidgetTrigger.
 
 User Dictionary Editor Added
 (12/6/2009) - Used AceGUI to add the ability to remove words from the user dictionary.
@@ -92,76 +68,89 @@ User Dictionary Editor Added
 
 (4/30/2025) - Changes added to RemoveHighlighting to parse new Item Quality # colors and Global Colors UI escape sequences.
 (12/18/2025) - Wow Retail 12.2.7 changes added to hook chat frames.
+(9/30/2026) - WoW Forever (interface 16001) support. Highlighting moved to an overlay so Misspelled
+              no longer taints chat, and keeps working in combat and boss encounters (see above).
 --]]--
 
 local _G = _G
 
-Misspelled = LibStub("AceAddon-3.0"):NewAddon("Misspelled", "AceEvent-3.0", "AceHook-3.0")
+Misspelled = LibStub("AceAddon-3.0"):NewAddon("Misspelled", "AceEvent-3.0")
 
 local Misspelled = _G.Misspelled
 
-Misspelled.Version = C_AddOns.GetAddOnMetadata("Misspelled", "Version")
+local GetAddOnMetadata = (C_AddOns and C_AddOns.GetAddOnMetadata) or _G.GetAddOnMetadata
+Misspelled.Version = GetAddOnMetadata and GetAddOnMetadata("Misspelled", "Version") or ""
 
 local AceGUI = LibStub("AceGUI-3.0")
 local L = LibStub("AceLocale-3.0"):GetLocale("Misspelled", true)
 
-local table_insert = table.insert
-local string_byte = string.byte
 local string_find = string.find
 local string_format = string.format
+local string_gmatch = string.gmatch
 local string_gsub = string.gsub
-local string_len = string.len
 local string_lower = string.lower
-local string_match = string.match
 local string_rep = string.rep
 local string_sub = string.sub
 local string_upper = string.upper
+local math_max = math.max
+local math_min = math.min
 local tostring = tostring
+local type = type
 local pairs = pairs
 local ipairs = ipairs
 
---local SPELLED_WRONG_HIGHLIGHT =   "|cffff91c8" --The color misspelled words will get changed into.
---local SPELLED_WRONG_HIGHLIGHT =   "|cffdea1d3" --The color misspelled words will get changed into.
---local SPELLED_WRONG_HIGHLIGHT =   "|cfffefe80" --The color misspelled words will get changed into.
-local SPELLED_WRONG_HIGHLIGHT_HEX_COLOR_CODE =   "ff7dc6fb" --The color misspelled words will get changed into. (Medium-Cyan-ish)
-local SPELLED_WRONG_HIGHLIGHT =   "|c"..SPELLED_WRONG_HIGHLIGHT_HEX_COLOR_CODE --The color misspelled words will get changed into. (Medium-Cyan-ish)
+--Midnight and WoW Forever return "secret" values in restricted states. A secret can't be compared,
+--measured or indexed by addon code, so anything that might be one is checked first.
+local issecretvalue = _G.issecretvalue or function() return false end
 
-local WordCache = {}           --Stores a cache of every word checked, along with the suggestions for words misspelled
+local UNDERLINE_COLOR = {1, 0.25, 0.25, 0.9} --r, g, b, a of the line drawn under misspelled words
+local UNDERLINE_THICKNESS = 2
+local LAYOUT_INTERVAL = 0.05 --Seconds between checks for caret, size or font changes that move the words
+
+local WORD_PATTERN = "[A-Za-z0-9_'À-ÿœæŒÆ]+"
+local WIDTH_MARKER = "." --Appended when measuring text that may end in spaces (see TextWidth)
+
+--WoW UI escape sequences (https://warcraft.wiki.gg/wiki/UI_escape_sequences) are replaced with
+--# characters of the same length, so their contents aren't spell checked while byte positions
+--stay the same. Whole links go first, so a link's [display text] is covered along with it.
+local WowTextMarkupEscapes = {
+	"|cn[^:]+:.-|r",          -- Global Colors and Item Quality colors: |cncolorname:text|r, |cnIQn:text|r
+	"|[Cc]%x-|H.-|h.-|h|r",   -- Hex color coded links: |cffxxxxxx|Htype:payload|h[text]|h|r
+	"|H.-|h.-|h",             -- Links without a color, with their [text]
+	"|H.-|h",                 -- Any remaining link
+	"|T.-|t",                 -- Textures
+	"|A.-|a",                 -- Texture atlas
+	"|K.-|k",                 -- Battle.net protected names
+	"{.-}",                   -- Raid target icons
+	"|n",                     -- Newline
+}
+
+local WordCache = {}           --Every word checked: WordCache[word] = {Correct = bool, Suggestions = table or nil}
 local WordCacheCount = 0       --Counter used to track when we should clean the WordCache table to save memory
-local WordCacheCountMax = 7000 --Number of entries tha can live in the WordCache before we clean the cache
-local WordLocations = {}       --Lookup table used by multiple functions to determine where each work starts and ends
-							   --There will be a sub-table for each EditBox:GetName() so we can store multiple sets of info at once.
-local SkipOnTextChanged = false -- use to avoid OnTextChanged event firing after spell checking highlights chat text.
-local RightClickedWord = nil   --The current word under the CursorPosition that was right-clicked
-local RightClickedWordStartPos --Where that word starts
-local RightClickedWordEndPos   --and where that word ends
-local RightClickedEditBox      --and what EditBox was right clicked
-local OldLineLength            --Tracks the previous length of the ChatEditBox.text
-local GuildRosterCalled = false
-local MaxColorCodes = 12       --The max amount of color codes we will add to the editbox text.
+local WordCacheCountMax = 7000 --Number of entries that can live in the WordCache before we clean the cache
 
-local Misspelled_Saved_CTL_SendChatMessage
-local Misspelled_CTL_hookedversion=0
+--Per edit box state, keyed by the edit box. Weak keys, and nothing is ever written onto
+--Blizzard's frames: a field written by addon code would taint them.
+local EditBoxState = setmetatable({}, {__mode = "k"})
+local HookedEditBoxes = setmetatable({}, {__mode = "k"})
+local BlizzardChatEditBoxes = setmetatable({}, {__mode = "k"})
+
+local GuildNames = {}  --Parts of guild member names, for the (Guild) note in the suggestions menu
+local FriendNames = {} --Parts of friend names, for the (Friend) note
 
 --Output debug messages to the DevTool addon (https://github.com/brittyazel/DevTool)
 function Misspelled:AddToInspector(data, strName)
 	if DevTool and self.DEBUG then
-		local valType = type(data)
-
-		if valType == "string" then
-			-- from: https://github.com/Gethe/wow-ui-source/blob/live/Interface/AddOns/Blizzard_SharedXML/Dump.lua
-			-- %q  "quotes" the string and escapes any special characters within it (like double quotes, newlines, etc.)
-			-- replacing | with || outputs UI escaped sequence strings displaying all color and link details
+		if type(data) == "string" then
+			-- %q "quotes" the string; replacing | with || shows all color and link escape sequences
 			data = string_gsub(string_format("%q", data), "[|]", "||")
-			DevTool:AddData(data, "Misspelled: " .. strName)
-		else
-			DevTool:AddData(data, "Misspelled: " .. strName)
 		end
+		DevTool:AddData(data, "Misspelled: " .. strName)
 	end
 end
 
 function Misspelled:OnInitialize()
-    --Enable to output debug messages created with calls to: AddToInspector(data, strName), to the addon: DevTool
+	--Enable to output debug messages created with calls to: AddToInspector(data, strName), to the addon: DevTool
 	--self.DEBUG = true
 
 	if Misspelled_DB == nil then
@@ -177,22 +166,15 @@ function Misspelled:OnInitialize()
 		Misspelled_DB.AutoSelectDictionary = true
 	end
 
-	local dict = "Auto"
-	if  Misspelled_DB.AutoSelectDictionary == true then
-		dict = "Auto"
-	else
-		dict = Misspelled_DB.LoadDictionary or "Auto"
-	end
-
 	--Load the Dictionary
 	local dictLoaded
-	if dict == "Auto" then
+	if Misspelled_DB.AutoSelectDictionary == true then
 		dictLoaded = WordDict:Init()
 	else
-		dictLoaded = WordDict:Init(dict)
+		dictLoaded = WordDict:Init(Misspelled_DB.LoadDictionary)
 	end
 
-	Misspelled:print("Misspelled: " .. L["Dictionary Loaded"] .." - " .. dictLoaded)
+	Misspelled:print("Misspelled: " .. L["Dictionary Loaded"] .. " - " .. dictLoaded)
 
 	--Load user dict
 	Misspelled:LoadUserDict()
@@ -202,1060 +184,729 @@ function Misspelled:OnInitialize()
 	self:CreateInterfaceOptions()
 
 	--Watch for other chat addons: Wim, to load and then integrate.
-	Misspelled:RegisterEvent("ADDON_LOADED")
+	self:RegisterEvent("ADDON_LOADED")
+end
 
-	--Guild members and Friends are valid words.
-	--Wait for the GUILD_ROSTER_UPDATE event to load
-	--the guild members & friends into the dictionary as valid words.
+function Misspelled:OnEnable()
+	self:HookChatEditBoxes()
+	self:IntegrateWIM()
 
-	--Register the GUILD_ROSTER_UPDATE event, so we know when we can load the
-	--Guild member names into the database
-	Misspelled:RegisterEvent("GUILD_ROSTER_UPDATE")
+	--Friends and guild members are valid words.
+	self:RegisterEvent("FRIENDLIST_UPDATE", "LoadFriends")
+	self:LoadFriends()
 
-
-	--GuildRoster can only be called every so often.
-	--If another addon triggered it first, we might miss notification.
-	--Moved to OnTextChanged
-	--GuildRoster()
-
-	--Patch 3.5 has multiple ChatEditBoxes.  We need to hook in differently.
-	--Updated for WoW 11.2.7: ChatEdit_ActivateChat exists but is never called.
-	--Force the new timer-based approach.
-
-	-- Use timer-based approach for 11.2.7+
-	local self = Misspelled
-	C_Timer.After(0.1, function()
-		local n = _G.NUM_CHAT_WINDOWS or 10
-		for i = 1, n do
-			local editbox = _G["ChatFrame" .. i .. "EditBox"]
-			if editbox then
-				local hooked = self:IsHooked(editbox, "OnTextChanged")
-				if not hooked then
-					self:WireUpEditBox(editbox)
-				end
-			end
+	if IsInGuild and IsInGuild() then
+		--The roster arrives with GUILD_ROSTER_UPDATE after we ask the server for it.
+		self:RegisterEvent("GUILD_ROSTER_UPDATE")
+		if C_GuildInfo and C_GuildInfo.GuildRoster then
+			C_GuildInfo.GuildRoster()
+		elseif _G.GuildRoster then
+			_G.GuildRoster() -- For older game clients
 		end
-	end)
-
-	if ChatEdit_ActivateChat ~= nil then
-		Misspelled:SecureHook("ChatEdit_ActivateChat")
-	elseif ChatFrameEditBox ~= nil then
-		Misspelled:WireUpEditBox(ChatFrameEditBox)
-	end
-
-	-- hooks for removing any misspelled word highlighting in the text before the chat message is sent
-	-- The Wow client will disconnect if you attempt to send a color tags in a chat message.
-	if C_ChatInfo and C_ChatInfo.SendChatMessage then
-		Misspelled:RawHook(C_ChatInfo, "SendChatMessage", Misspelled.SendChatMessage, true)
-	else
-		Misspelled:RawHook("SendChatMessage", Misspelled.SendChatMessage, true) -- For non-retail game clients
 	end
 end
 
-
-function Misspelled:WireUpEditBox(editbox)
-	Misspelled:SecureHookScript(editbox, "OnEscapePressed", Misspelled.EditBox_OnEscapePressed)
-	Misspelled:SecureHookScript(editbox, "OnEnterPressed", Misspelled.EditBox_OnEnterPressed)
-	Misspelled:SecureHookScript(editbox, "OnTextChanged", Misspelled.EditBox_OnTextChanged)
-	Misspelled:HookScript(editbox, "OnMouseUp", Misspelled.EditBox_OnMouseUp)  -- Used to hook mouse right-clicks to show suggestions frame
+function Misspelled:ADDON_LOADED(event, addonName)
+	if addonName == "WIM" then
+		self:IntegrateWIM()
+	end
 end
 
 function Misspelled:GUILD_ROSTER_UPDATE()
-	Misspelled:LoadGuildAndFriendRoster()
+	self:LoadGuildRoster()
 end
 
-function Misspelled:ADDON_LOADED(event, addonName)
-	if event == "ADDON_LOADED" and addonName == "WIM" then
-		WIM.RegisterWidgetTrigger("msg_box", "whisper,chat,w2w", "OnEscapePressed", Misspelled.EditBox_OnEscapePressed)
-		WIM.RegisterWidgetTrigger("msg_box", "whisper,chat,w2w", "OnEnterPressed", Misspelled.EditBox_OnEnterPressed)
-		WIM.RegisterWidgetTrigger("msg_box", "whisper,chat,w2w", "OnTextChanged", Misspelled.EditBox_OnTextChanged)
-		--WIM.RegisterWidgetTrigger("msg_box", "whisper,chat,w2w", "OnMouseUp", Misspelled.EditBox_OnMouseUp)
 
+-------------------------------------------------------------------------
+--
+-- Hooking chat edit boxes
+--
+-------------------------------------------------------------------------
 
-		--Before a chat message is sent, remove any highlighting that Misspelled might have added.
-		--The Wow client will disconnect if you attempt to send a colored chat message.
+--Only post-hooks are used (HookScript, hooksecurefunc): Blizzard's own handler runs first and
+--untainted, then ours. Scripts are never replaced.
+function Misspelled:HookEditBox(editbox, isBlizzardChat)
+	if editbox == nil or type(editbox.HookScript) ~= "function" then return end
+	if isBlizzardChat then
+		BlizzardChatEditBoxes[editbox] = true
+	end
+	if HookedEditBoxes[editbox] then return end
+	HookedEditBoxes[editbox] = true
 
-		--If available use the WIM API: Wim.RegisterPreSendFilterText
+	editbox:HookScript("OnTextChanged", Misspelled.EditBox_OnTextChanged)
+	editbox:HookScript("OnMouseUp", Misspelled.EditBox_OnMouseUp) -- Right-clicks show the suggestions menu
+	editbox:HookScript("OnEscapePressed", Misspelled.EditBox_OnReset)
+	editbox:HookScript("OnEnterPressed", Misspelled.EditBox_OnReset)
+end
 
-		--WIM sends its chat messages via the API ChatThrottleLib,
-		--ChatThrottleLib hooks the default SendChatMessage api, many times, before Misspelled can.
-		--ChatThrottleLib is used in many addons, that potentially load before Misspelled.
-		--So we have to hook ChatThrottleLib just to be safe.
-
-
-		if(WIM.RegisterPreSendFilterText) then -- avoid error if WIM not up to date.
-			WIM.RegisterPreSendFilterText(function(text)
-											return Misspelled:RemoveHighlighting(text)
-										  end)
-		else
-			if(ChatThrottleLib and Misspelled_CTL_hookedversion < ChatThrottleLib.version) then
-				Misspelled_Saved_CTL_SendChatMessage=ChatThrottleLib.SendChatMessage
-
-				function ChatThrottleLib:SendChatMessage(prio, prefix, text, ...)
-					text = Misspelled:RemoveHighlighting(text)
-					--print("Misspelled Hooked ChatThrottleLib_SendChatMessaged called")
-					return Misspelled_Saved_CTL_SendChatMessage(ChatThrottleLib, prio, prefix, text, ...)
-				end
-				Misspelled_CTL_hookedversion=ChatThrottleLib.version
-			end
+function Misspelled:HookChatEditBoxes()
+	local numWindows = _G.NUM_CHAT_WINDOWS or 10
+	for i = 1, numWindows do
+		self:HookEditBox(_G["ChatFrame" .. i .. "EditBox"], true)
+	end
+	if type(_G.CHAT_FRAMES) == "table" then
+		for _, frameName in ipairs(_G.CHAT_FRAMES) do
+			self:HookEditBox(_G[frameName .. "EditBox"], true)
 		end
 	end
-end
-
---Patch 3.5 Hook ChatFrame.lua ChatEdit_ActivateChat(editBox)
-function Misspelled:ChatEdit_ActivateChat(editBox)
-	--Make sure this editbox is hooked
-	--print("EditBox to hook: " .. editBox:GetName())
-	local hooked, hookHandler  = Misspelled:IsHooked(editBox, "OnTextChanged")
-	if  hooked == false then
-		Misspelled:WireUpEditBox(editBox)
+	if _G.ChatFrameEditBox then
+		self:HookEditBox(_G.ChatFrameEditBox, true) -- Very old game clients
 	end
 
-	self.hooks["ChatEdit_ActivateChat"](editBox)
-end
-
---Before a chat message is sent, remove any highlighting that Misspelled might have added.
---The Wow client will disconnect if you attempt to send Hex code colored text in a chat message.
-function Misspelled.SendChatMessage(message, chatType, languageID, target, ...)
-	local cleanedMessage = Misspelled:RemoveHighlighting(message)
-
-	--On DEBUG only
-	--Misspelled:AddToInspector(cleanedMessage, "Misspelled:SendChatMessage - gotMessage")
-	
-	--self.hooks[C_ChatInfo]["SendChatMessage"](cleanedMessage, chatType, languageID, target, ...)
-	local gameType = "Unknown"
-
-	if WOW_PROJECT_ID ~= nil then
-		if WOW_PROJECT_ID == WOW_PROJECT_MAINLINE then
-			gameType = "MAINLINE"
-
-		end
+	--Edit boxes created later (whisper windows, popped out chats) are hooked when first activated.
+	local function OnActivateChat(editBox)
+		Misspelled:HookEditBox(editBox, true)
 	end
-
-	if gameType == "MAINLINE" then
-		Misspelled.hooks[C_ChatInfo]["SendChatMessage"](cleanedMessage, chatType, languageID, target, ...)
-	else
-        Misspelled.hooks["SendChatMessage"](cleanedMessage, chatType, languageID, target, ...)
+	if ChatFrameUtil and ChatFrameUtil.ActivateChat then
+		hooksecurefunc(ChatFrameUtil, "ActivateChat", OnActivateChat) -- Midnight, WoW Forever
+	elseif _G.ChatEdit_ActivateChat then
+		hooksecurefunc("ChatEdit_ActivateChat", OnActivateChat) -- Older game clients
 	end
 end
 
---Possible changes:
---A single new character was inserted at the end of the line (line length grew by 1)
---	  If this char is a word separator, then spell check the line
---
---Any other change in the line, requires we recheck the entire line.
---More than a single character was pasted or linked into the line.
---	remove any highlighting and recheck the entire line.
---
---A single character was removed from the line
+function Misspelled:IntegrateWIM()
+	if self.wimIntegrated or not (WIM and WIM.RegisterWidgetTrigger) then return end
+	self.wimIntegrated = true
+
+	--WIM's message boxes belong to WIM, so we only need to know when their text changes.
+	WIM.RegisterWidgetTrigger("msg_box", "whisper,chat,w2w", "OnTextChanged", function(msgBox)
+		Misspelled:HookEditBox(msgBox)
+		Misspelled:CheckEditBox(msgBox)
+	end)
+end
+
 function Misspelled.EditBox_OnTextChanged(editbox)
-	if SkipOnTextChanged == true then
-		SkipOnTextChanged = false
-		return
-	end
-
-	--print("Editbox name:", editbox:GetName())
-
-	--Load the guild roster if needed
-	if GuildRosterCalled == false then
-		if IsInGuild() == 1 then
-			C_GuildInfo.GuildRoster() --Request updated guid roseter info from the server
-		else
-			Misspelled:LoadGuildAndFriendRoster()
-		end
-		GuildRosterCalled = true
-	end
-
-
-	local text = editbox:GetText()
-	local pos = editbox:GetCursorPosition()
-
-	--print ("TextChaged:", editbox:GetCursorPosition(), string.gsub(editbox:GetText(), "\124", "\124\124"))
-
-	local newLineLength = #text
-
-	--Check if we should clear the WordCache table to save memory, if it's gotten very large
-	if newLineLength == 0 then
-		if WordCacheCount > WordCacheCountMax then
-			WordCache = {}
-			WordCacheCount = 0
-		end
-	end
-
-
-	--if the first char is a /, indicating some slash command, skip spellchecking the text.
-	if (string_sub(text, 1, 1) == "/" ) then
-		local cleanedChatMessage = Misspelled:RemoveHighlighting(text)
-		if text ~= cleanedChatMessage then
-			editbox:SetText(cleanedChatMessage)
-			if pos == 1 or pos== 0  then
-			  editbox:SetCursorPosition(pos)
-			end
-			OldLineLength = #text
-		end
-
-		RightClickedWord = nil
-		WordLocations[editbox:GetName()] = {}
-		return
-	end
-
-
-	--If we currently just added one new char to the end of the line, see if it's a word boundary char
-	--CursorPosition (pos) must be at the end of the line, and the line size must have had grown by
-	--one character.
-	if pos == #text and newLineLength -1 == OldLineLength then
-		local lastChar = string_sub(text, -1, -1)
-		if string_match(lastChar, "[ %(%);,%.!%?:\"]") ~= nil then
-			Misspelled:SpellCheckChat(editbox)
-		end
-	elseif pos ~= #text then
-		----We must be making some other kind of edit someplace other than at the end of the line.
-		----Recheck the entire line
-		Misspelled:SpellCheckChat(editbox)
-	end
-
-	--Save the new line length for use with the next round of OnTextChanged processing.
-	OldLineLength = #editbox:GetText()
+	Misspelled:CheckEditBox(editbox)
 end
 
-function Misspelled.EditBox_OnEscapePressed(editbox)
-	RightClickedWord = nil
-	WordLocations[editbox:GetName()] = {}
+--Enter or Escape. Blizzard's handler has already run and usually cleared the text.
+function Misspelled.EditBox_OnReset(editbox)
+	Misspelled:HideSuggestions(editbox)
+	Misspelled:CheckEditBox(editbox, true)
 end
 
-function Misspelled.EditBox_OnEnterPressed(editbox)
-	RightClickedWord = nil
-	WordLocations[editbox:GetName()] = {}
+function Misspelled.EditBox_OnMouseUp(editbox, button)
+	if button ~= "RightButton" then return end
+	local state = EditBoxState[editbox]
+	if state == nil or #state.misspelled == 0 then return end
 
-	--before message is sent, remove and misspelled highlighting
-	local cleanedChatMessage = Misspelled:RemoveHighlighting(editbox:GetText())
-	WordLocations[editbox:GetName()] = {}
-	editbox:SetText(cleanedChatMessage)
-end
-
-
---Return a string where misspelled words are highlighted
---If this string is a slash command "/", don't perform any highlighting
---We should keep track of the current edit cursor position,
---so we can report it's new position after highlighting.
-function Misspelled:SpellCheckChat(editbox)
-	local editboxText = editbox:GetText()
-
-	if #editboxText < 2 then return end
-
-	--Ensure we have hooked the MouseUp event
-	--Should fix Chatter changing the OnMouseUp script to nil.  Bad Chatter
-	local hooked, hookHandler  = Misspelled:IsHooked(editbox, "OnMouseUp")
-	if  hooked == false or (hooked == true and hookHandler ~= self.OnMouseUp) then
-		Misspelled:Unhook(editbox, "OnMouseUp")
-		Misspelled:RawHookScript(editbox, "OnMouseUp", Misspelled.EditBox_OnMouseUp)
-	end
-
-	local newText = editboxText
-
-	--Watch how many characters we insert or remove from the left side of the cursor position.
-	--We'll adjust the cursor position to compensate for any misspelled word Hex code colored text added by Misspelled.
-	local newCPos
-
-	--remove any previous misspelling highlighting before checking the editboxText for misspellings.
-	newText, newCPos = Misspelled:RemoveHighlighting(editboxText, editbox:GetCursorPosition())
-
-	WordLocations[editbox:GetName()] = {}
-
-	--If this is a command, don't spellcheck or highlight
-	if string_sub(editboxText, 1, 1) == "/" then
-		if newText ~= editboxText then
-			editbox:SetText(newText)
-			editbox:SetCursorPosition(newCPos)
-		end
-	end
-
-	--Find misspelled words & populate the WordLocations info.
-	Misspelled:CheckLine(newText, editbox)
-
-	local colorCodesAdded = 0
-	--Use the WordLocation info to march backwards through the input text,
-	--highlighting misspellings
-	--tprint(WordLocations)
-	local w
-	for x = #WordLocations[editbox:GetName()], 1, -1 do
-		w = WordLocations[editbox:GetName()][x]
-		if WordCache[w.Word].Correct == false then
-			--Insert highlighting
-			newText = string_sub(newText, 1, w.StartPos -1) .. SPELLED_WRONG_HIGHLIGHT .. string_sub(newText, w.StartPos, w.EndPos) .. FONT_COLOR_CODE_CLOSE .. string_sub(newText, w.EndPos + 1)
-
-			--Adjust cursor position if the cursor was to the right of the first char in the word we're highlighting.
-			if newCPos >= w.EndPos then
-				newCPos = newCPos + #SPELLED_WRONG_HIGHLIGHT + #FONT_COLOR_CODE_CLOSE
-			elseif newCPos >= w.StartPos then
-				newCPos = newCPos + #SPELLED_WRONG_HIGHLIGHT
-			end
-
-			colorCodesAdded = colorCodesAdded + 1
-			if colorCodesAdded >= MaxColorCodes then 
-				--Truncate WordLocations to here, because there are too many misspelled words.
-				--The WoW chatbox won't let us add more than so many color coded sections.
-				
-				--Delete all entries before x
-				WordLocations[editbox:GetName()] = { unpack( WordLocations[editbox:GetName()], x ) }
-				
-				break
-			end
-		end
-	end
-
-	--Adjust the word's WordLocation StartPos and EndPos, wherever we added highlighting.
-	--The right click handler uses this position info. to detect the misspelled word that was right clicked.
-	--March forward this time
-	local n = 0 --NewCharsAddedCounter
-	for x = 1, #WordLocations[editbox:GetName()] do
-		w = WordLocations[editbox:GetName()][x]
-		if WordCache[w.Word].Correct == false then
-			w.StartPos = w.StartPos + n + #SPELLED_WRONG_HIGHLIGHT
-			n = n + #SPELLED_WRONG_HIGHLIGHT
-			w.EndPos = w.EndPos + n
-			n = n + #FONT_COLOR_CODE_CLOSE
-		end
-	end
-
-	if newText ~= editboxText then
-		--When we call settext, an OnSetText event will fire.
-		--Execution of this event should be skipped to avoid SpellCheckChat from running twice.
-		--Use a local toggle to skip this second firing
-		SkipOnTextChanged = true
-		editbox:SetText(newText)
-		editbox:SetCursorPosition(newCPos)
+	local entry = Misspelled:GetMisspelledWordAtMouse(editbox, state)
+	if entry then
+		Misspelled:ShowSuggestions(editbox, entry)
 	end
 end
 
 
-
---Finds all words in the input text string, ignoring any Wow hyperlinks or textures.
---These links or textures will be replaced with a sequence of # characters, the same length of the color+link,
---so the contents of these are not spellchecked.
+-------------------------------------------------------------------------
 --
---Next populate the table, WordLocations, storing the following info. on each word:
---	WordLocations[x] = {["word"] = word, ["StartPos"] = matchPosStart, ["EndPos"] = matchPosEnd}
---		x == Ordinal position of the word in the text string
+-- Spell checking
 --
---Next check each word to see we need to cache spell check info for the word.
---Words with numbers or words in all upper case are ignored.
---Store in the WordCache table whether the word is spell correctly, along with the
---any misspelled replacement suggestions.
---
---Trim the WordCache table if it's grown very large
-function Misspelled:CheckLine(text, editbox)
-	--Reset the info on where each word is located
-	WordLocations[editbox:GetName()] = {}
+-------------------------------------------------------------------------
 
-	if text == nil then return end
-	if #text == 0 then return end
+--Returns true when the word is in the dictionary. Results are cached in WordCache.
+function Misspelled:IsWordCorrect(word)
+	local cached = WordCache[word]
+	if cached == nil then
+		--See if the dictionary contains the word, or the lower case version of the word
+		local correct = WordDict:Contains(word) or WordDict:Contains(string_lower(word))
+		cached = {Correct = correct and true or false}
+		WordCache[word] = cached
+		WordCacheCount = WordCacheCount + 1
+	end
+	return cached.Correct
+end
 
-	--Find if there are any WoW UI escape sequences on this line, and replace them with # chars, 
-	--so they don't match as words in the next stage of parsing and get ignored for spellchecking.
-	--ref: https://warcraft.wiki.gg/wiki/UI_escape_sequences
-	-- |cn[^:]+:.*|r          -- Global Colors text (new in 11.1.5 - |cncolorname:text|r)
-	-- |cnIQ%d:.*|r           -- Item Quality Colors (new in 11.1.5 - |cnIQn:text|r
-	-- |[Cc]%x-|H.+|h.+|h|r   -- Hex color coded text with links (format: |cffxxxxxx|Htype:payload|h[text]|h|r ) https://warcraft.wiki.gg/wiki/Hyperlinks
-	-- |cn[^:]+:|H.+|h.+h|r   -- Global Colors / Custom item color links (new in 11.1.5 - |cncolorname:text|r) https://warcraft.wiki.gg/wiki/UI_escape_sequences#:~:text=back%20to%20white-,Global%20Colors,-%7Ccncolorname%3A
-	-- |H.*|h                 -- Links
-	-- |T.*|t                 -- Textures
-	-- |A.*|a                 -- Texture Atlas
-	-- {.-}                   -- Raid target icons
-	-- |n                     -- newline character
-	local newText = text
-	-- newText = string_gsub(newText, "(|[Cc]%x-|H.-|h.-|h|r)", function(x) return string_rep("#", #x) end)
-	-- newText = string_gsub(newText, "(|H.*|h)", function(x) return string_rep("#", #x) end)
-	-- newText = string_gsub(newText, "(|T.*|t)", function(x) return string_rep("#", #x) end)
-	-- newText = string_gsub(newText, "({.-})", function(x) return string_rep("#", #x) end)
-	-- newText = string_gsub(newText, "(|n)", function(x) return string_rep("#", #x) end)
+--Replaces WoW UI escape sequences with # characters of the same length.
+function Misspelled:MaskEscapeSequences(text)
+	for _, patt in ipairs(WowTextMarkupEscapes) do
+		text = string_gsub(text, patt, function(x) return string_rep("#", #x) end)
+	end
+	return text
+end
 
-	local WowTextMarkupEscapes = {
-		["(|cn[^:]+:.-|r)"] = "#",        -- Global Colors text
-		["(|cnIQ%d:.-|r)"] = "#",         -- Item Quality Colors text
-		["(|[Cc]%x-|H.-|h.-|h|r)"] = "#", -- Hex color coded text with optional colored links
-		["(|H.-|h)"] = "#",               -- Links
-		["(|T.-|t)"] = "#",               -- Textures
-		["(|A.-|a)"] = "#",               -- Texture Atlas
-		["({.-})"] = "#",                 -- Raid target icons
-		["(|n)"] = "#"                    -- Newline character
-	}
+--Finds the misspelled words in a line of chat text.
+--Returns an array of {Word = word, StartPos = n, EndPos = n}, byte positions in text, in order.
+--Slash commands aren't checked. Words in all upper case or with numbers in them are ignored.
+--The last word isn't checked until it's finished, i.e. until some word terminator follows it.
+function Misspelled:FindMisspelledWords(text)
+	local found = {}
+	if text == nil or text == "" then return found end
+	if string_sub(text, 1, 1) == "/" then return found end
 
-	for k, v in pairs(WowTextMarkupEscapes) do
-        newText = string_gsub(newText, k, function(x) return string_rep(v, #x) end)
-    end
+	local maskedText = self:MaskEscapeSequences(text)
+	local textLength = #text
 
-	--March through the text, finding the words, record there start & end positions, and spell check status
-	local patt = "[A-Za-z0-9_'À-ÿœæŒÆ]+"
-	local matchPosStart
-	local matchPosEnd
-
-	matchPosStart, matchPosEnd = string_find(newText, patt)
-
-	local x = 0
-	local word
-	local correct
+	local matchPosStart, matchPosEnd = string_find(maskedText, WORD_PATTERN)
 	while matchPosStart ~= nil do
-		word = string_sub(newText, matchPosStart, matchPosEnd)
+		local word = string_sub(maskedText, matchPosStart, matchPosEnd)
+		if matchPosEnd < textLength
+			and word ~= string_upper(word)
+			and string_find(word, "%d") == nil
+			and not self:IsWordCorrect(word) then
+			found[#found + 1] = {Word = word, StartPos = matchPosStart, EndPos = matchPosEnd}
+		end
+		matchPosStart, matchPosEnd = string_find(maskedText, WORD_PATTERN, matchPosEnd + 1)
+	end
+	return found
+end
 
-		--ignore all uppercase words
-		if word ~= string_upper(word) then
-			--ignore words with numbers in them
-			if string_match(word, "[%d]") == nil then
-				x = x + 1
-				WordLocations[editbox:GetName()][x] = {["Word"] = word, ["StartPos"] = matchPosStart, ["EndPos"] = matchPosEnd}
+local function GetState(editbox)
+	local state = EditBoxState[editbox]
+	if state == nil then
+		state = {misspelled = {}, segments = {}, lines = {}, scroll = 0}
+		EditBoxState[editbox] = state
+	end
+	return state
+end
 
-				if WordCache[word] == nil then
-					correct = false
+--Spell checks the text in an edit box and underlines the misspelled words.
+--This only reads the edit box; its text is never changed here.
+function Misspelled:CheckEditBox(editbox, force)
+	local state = GetState(editbox)
+	local text = editbox:GetText()
+	if text == nil or issecretvalue(text) then
+		self:ClearEditBox(editbox)
+		return
+	end
+	if text == state.text and not force then return end
+	state.text = text
 
-					--Ignore words in all upper case
-					if word == string_upper(word) then
-						correct = true
-					end
+	--Clear the WordCache table to save memory, if it's gotten very large
+	if text == "" and WordCacheCount > WordCacheCountMax then
+		WordCache = {}
+		WordCacheCount = 0
+	end
 
-					--See if the dictionary contains the word
-					if correct == false then
-						correct = WordDict:Contains(word)
-					end
+	state.misspelled = self:FindMisspelledWords(text)
+	if #state.misspelled > 0 then
+		self:CreateOverlay(editbox, state)
+		state.overlay:Show()
+		self:LayoutHighlights(editbox)
+	else
+		self:ClearEditBox(editbox, true)
+	end
+end
 
-					--Try the lower case version of the word
-					if correct == false then
-						correct = WordDict:Contains(string_lower(word))
-					end
+--Removes the underlines. The overlay is hidden too, so its OnUpdate only runs while there
+--are misspelled words.
+function Misspelled:ClearEditBox(editbox, keepText)
+	local state = EditBoxState[editbox]
+	if state == nil then return end
+	state.misspelled = {}
+	for i = #state.segments, 1, -1 do
+		state.segments[i] = nil
+	end
+	for _, line in ipairs(state.lines) do
+		line:Hide()
+	end
+	if not keepText then
+		state.text = nil
+	end
+	if state.overlay then
+		state.overlay:Hide()
+	end
+end
 
-					--Cache the results
-					WordCache[word] = {["Correct"] = correct} --, ["Suggestions"] = {}}
-					WordCacheCount = WordCacheCount + 1
-					--Changed to delay searching for suggestions until someone right-clicks on a misspelled word.
-					--Adding UTF8 support slows the suggestion generation.
---~ 					if correct == false then
---~ 						local suggestions = {}
---~ 						suggestions = WordDict:Suggest(word)
---~ 						if #suggestions > 0 then
---~ 							WordCache[word].Suggestions = suggestions
---~ 						end
---~ 					end
+--Checks every edit box again, after the dictionary or ignored words changed.
+function Misspelled:RecheckAll()
+	for editbox, state in pairs(EditBoxState) do
+		if state.text ~= nil then
+			self:CheckEditBox(editbox, true)
+		end
+	end
+end
+
+
+-------------------------------------------------------------------------
+--
+-- Underlining misspelled words
+--
+-------------------------------------------------------------------------
+
+--Emulates how a single line EditBox scrolls sideways to keep the caret in view:
+--as little as needed, and never past the end of the text. All values are in pixels.
+function Misspelled.ComputeScroll(scroll, caretX, textWidth, visibleWidth)
+	if textWidth <= visibleWidth then return 0 end
+	if caretX - scroll > visibleWidth then
+		scroll = caretX - visibleWidth
+	end
+	if caretX < scroll then
+		scroll = caretX
+	end
+	if textWidth - scroll < visibleWidth then
+		scroll = textWidth - visibleWidth
+	end
+	if scroll < 0 then
+		scroll = 0
+	end
+	return scroll
+end
+
+local function Overlay_OnUpdate(overlay, elapsed)
+	overlay.elapsed = (overlay.elapsed or 0) + elapsed
+	if overlay.elapsed < LAYOUT_INTERVAL then return end
+	overlay.elapsed = 0
+
+	local editbox = overlay:GetParent()
+	local state = EditBoxState[editbox]
+	if state == nil or #state.misspelled == 0 then return end
+
+	--Words move when the caret scrolls the text, the box is resized, the chat type header
+	--changes the text insets, or the chat font size changes.
+	local caret = editbox:GetCursorPosition()
+	if issecretvalue(caret) then return end
+	local left, right = editbox:GetTextInsets()
+	local _, fontSize = editbox:GetFont()
+	if caret ~= state.lastCaret or editbox:GetWidth() ~= state.lastWidth or left ~= state.lastLeft
+		or right ~= state.lastRight or fontSize ~= state.fontSize then
+		Misspelled:LayoutHighlights(editbox)
+	end
+end
+
+function Misspelled:CreateOverlay(editbox, state)
+	if state.overlay then return end
+
+	--Our own child frame on top of the edit box. It doesn't take the mouse, so clicks and
+	--typing still go to the edit box.
+	local overlay = CreateFrame("Frame", nil, editbox)
+	overlay:SetAllPoints(editbox)
+	overlay:SetScript("OnUpdate", Overlay_OnUpdate)
+
+	--Hidden font string, used to measure the width of the text as the edit box draws it.
+	--It starts with the chat font: SetText fails on a font string that has no font.
+	local measure = overlay:CreateFontString(nil, "BACKGROUND", "ChatFontNormal")
+	measure:SetPoint("TOPLEFT")
+	measure:SetAlpha(0)
+
+	state.overlay = overlay
+	state.measure = measure
+end
+
+--Keeps the measuring font string in the edit box's font. Returns the font height.
+local function ApplyFont(editbox, state)
+	local font, fontSize, fontFlags = editbox:GetFont()
+	if font then
+		if font ~= state.font or fontSize ~= state.fontSize or fontFlags ~= state.fontFlags then
+			state.measure:SetFont(font, fontSize, fontFlags or "")
+			state.font, state.fontSize, state.fontFlags = font, fontSize, fontFlags
+			state.markerWidth = nil
+		end
+	else
+		local fontObject = editbox:GetFontObject()
+		if fontObject and fontObject ~= state.fontObject then
+			state.measure:SetFontObject(fontObject)
+			state.fontObject = fontObject
+			state.markerWidth = nil
+		end
+		local _
+		_, fontSize = state.measure:GetFont()
+	end
+	return fontSize or 14
+end
+
+local function StringWidth(measure, s)
+	measure:SetText(s)
+	if measure.GetUnboundedStringWidth then
+		return measure:GetUnboundedStringWidth()
+	end
+	return measure:GetStringWidth()
+end
+
+--Width of s drawn from the start of the line. A marker is measured on the end, so trailing
+--spaces count even if the font string would trim them.
+local function TextWidth(state, s)
+	if s == "" then return 0 end
+	if state.markerWidth == nil then
+		state.markerWidth = StringWidth(state.measure, WIDTH_MARKER)
+	end
+	return StringWidth(state.measure, s .. WIDTH_MARKER) - state.markerWidth
+end
+
+function Misspelled:LayoutHighlights(editbox)
+	local state = EditBoxState[editbox]
+	if state == nil or state.overlay == nil then return end
+
+	local segments = state.segments
+	for i = #segments, 1, -1 do
+		segments[i] = nil
+	end
+
+	local shown = 0
+	local text = state.text
+	local caret = editbox:GetCursorPosition()
+	if issecretvalue(caret) then
+		caret = nil
+	end
+	local width = editbox:GetWidth()
+	local left, right, top, bottom = editbox:GetTextInsets()
+	state.lastCaret, state.lastWidth, state.lastLeft, state.lastRight = caret, width, left, right
+
+	--Word wrapping in multi-line boxes isn't worked out; right-click still finds the word by caret.
+	local canDraw = #state.misspelled > 0 and text ~= nil and caret ~= nil
+		and not (editbox.IsMultiLine and editbox:IsMultiLine())
+	local visibleWidth = canDraw and (width - left - right) or 0
+
+	if visibleWidth > 0 then
+		local fontSize = ApplyFont(editbox, state)
+		local textWidth = TextWidth(state, text)
+		local caretX = TextWidth(state, string_sub(text, 1, caret))
+		state.scroll = Misspelled.ComputeScroll(state.scroll, caretX, textWidth, visibleWidth)
+
+		--Single line text is centered vertically between the top and bottom insets.
+		local lineY = (bottom - top) / 2 - fontSize / 2 - 1
+
+		for _, entry in ipairs(state.misspelled) do
+			local wordEndX = TextWidth(state, string_sub(text, 1, entry.EndPos))
+			local wordStartX = wordEndX - StringWidth(state.measure, entry.Word)
+			local x1 = left + math_max(wordStartX - state.scroll, 0)
+			local x2 = left + math_min(wordEndX - state.scroll, visibleWidth)
+			if x2 - x1 >= 1 then
+				shown = shown + 1
+				local line = state.lines[shown]
+				if line == nil then
+					line = state.overlay:CreateTexture(nil, "OVERLAY")
+					line:SetColorTexture(UNDERLINE_COLOR[1], UNDERLINE_COLOR[2], UNDERLINE_COLOR[3], UNDERLINE_COLOR[4])
+					state.lines[shown] = line
+				end
+				line:ClearAllPoints()
+				line:SetPoint("TOPLEFT", state.overlay, "LEFT", x1, lineY)
+				line:SetSize(x2 - x1, UNDERLINE_THICKNESS)
+				line:Show()
+				segments[shown] = {entry = entry, x1 = x1, x2 = x2}
+			end
+		end
+	end
+
+	for i = shown + 1, #state.lines do
+		state.lines[i]:Hide()
+	end
+end
+
+--Returns the misspelled word entry under the mouse, or nil.
+function Misspelled:GetMisspelledWordAtMouse(editbox, state)
+	if #state.segments > 0 then
+		local boxLeft = editbox:GetLeft()
+		local scale = editbox:GetEffectiveScale()
+		if boxLeft and scale and scale > 0 then
+			local mouseX = GetCursorPosition() / scale - boxLeft
+			for _, segment in ipairs(state.segments) do
+				if mouseX >= segment.x1 - 2 and mouseX <= segment.x2 + 2 then
+					return segment.entry
 				end
 			end
 		end
-
-		matchPosStart, matchPosEnd = string_find(newText, patt, matchPosEnd+1)
+		return nil
 	end
+
+	--No drawn positions to go by: a click also moves the caret, so use that.
+	local caret = editbox:GetCursorPosition()
+	if issecretvalue(caret) then return nil end
+	for _, entry in ipairs(state.misspelled) do
+		if caret >= entry.StartPos - 1 and caret <= entry.EndPos then
+			return entry
+		end
+	end
+	return nil
 end
 
-
-
---Return a string where the highlighting has been removed from any misspelled words,
---with the goal to not change or destroy any other UI escaped sequences present in the chat message,
---such as colored text, Wow itemLinks or textures. 
---(https://warcraft.wiki.gg/wiki/UI_escape_sequences & http://www.wowwiki.com/ItemLink)
---
---Misspelled word highlighting is added with a Hex color coded UI escape sequence: |cff7dc6fbMisspelledtext|r
---The chat message text may contain other UI escaped sequences such at item links.
---The chat message text could also contain one or more pipe characters ||, complicating parsing.
---
--- Note: Lua's standard regular expression library has limitations compared to some other regex engines.
--- It does not support features like negative lookahead assertions ((?!...)),
--- which are typically used to assert that a sequence is not present.
--- Therefore, a single Lua regular expression cannot directly say "match everything until |r, but fail if |h is encountered before that".
---
---Potential refactor: 
--- 1) Use a regular expression to match any block starting with |cff7dc6fb and ending with |r, capturing everything in between.
---    regex capture: |c%x-(.-)|r
--- 2) Check the captures text to ensure it does not contain the sequence |h.
---
---It's possible that a recent edit has started to destroy the color tags, either at the
---beginning or end of a highlighted misspelled word.
---Attempt to detect this and remove any dangling colored text tags.
-function Misspelled:RemoveHighlighting(text, ...)
-	-- \124 is the ASCII code for the pipe '|' character.
-	--Misspelled:AddToInspector(string_gsub(text, "\124", "\124\124"), "RemoveHighlighting-input")
-	--Blizzard uses string.gsub(textString, "[|]", "||"), in the /dump source code 
-	
-	local cleanedChatMessage
-	local newText = text
-
-	--Track the number of characters removed from the left side of the current cursor position.
-	local cPos
-	if ... ~= nil then
-		cPos = ...
-	else
-		cPos = 0
-	end
-
-	local itemLinks = {}
-	local itemLink
-	local itemLinkNum = 1
-
-	local patt, matchPosStart, matchPosEnd
-	local tokenSize
-	local tempToken
-	local tempText
-	local charsRemoved  --Tracks the chars removed from the left of the cursor
-
-	--Try and match Global Colors text. (|cncolorname:text|r)
-	--Use a non-greedy match character (-) in the match pattern rather than a greed match character (*)
-	patt = "(|cn[^:]+:.-|r)"
-	matchPosStart, matchPosEnd = string_find(newText, patt)
-
-	while matchPosStart ~= nil do
-		--Store the itemlink and it's relative position so it can be replaced latter
-		itemLink = string_sub(newText, matchPosStart, matchPosEnd)
-		itemLinks[itemLinkNum] = itemLink
-
-		tokenSize = #itemLink
-		tempToken = "{<<" .. tostring(itemLinkNum)
-		tempToken = tempToken .. string_rep(">", tokenSize - #tempToken - 1) .. "}"
-
-		--Replace this itemlink with a temporary placeholder code
-		newText = string_gsub(newText, patt, tempToken, 1)
-
-		itemLinkNum = itemLinkNum + 1
-		matchPosStart, matchPosEnd = string_find(newText, patt)
-	end
-
-	--Try and match (IQn) Item Quality Colors text. (|cnIQn:text|r)
-	--Use a non-greedy match character (-) in the match pattern rather than a greed match character (*)
-	patt = "(|cnIQ%d:.-|r)"
-	matchPosStart, matchPosEnd = string_find(newText, patt)
-
-	while matchPosStart ~= nil do
-		--Store the itemlink and it's relative position so it can be replaced latter
-		itemLink = string_sub(newText, matchPosStart, matchPosEnd)
-		itemLinks[itemLinkNum] = itemLink
-
-		tokenSize = #itemLink
-		tempToken = "{<<" .. tostring(itemLinkNum)
-		tempToken = tempToken .. string_rep(">", tokenSize - #tempToken - 1) .. "}"
-
-		--Replace this itemlink with a temporary placeholder code
-		newText = string_gsub(newText, patt, tempToken, 1)
-
-		itemLinkNum = itemLinkNum + 1
-		matchPosStart, matchPosEnd = string_find(newText, patt)
-	end
-
-	--Try and match Hex code colored Item links.  The Addon GHI (Gryphonheart Items) colors links with a capitol C, non-standard.
-	patt = "|[Cc]%x+|H.-|h.-|h|r"
-	matchPosStart, matchPosEnd = string_find(newText, patt)
-
-	while matchPosStart ~= nil do
-		--Store the itemlink and it's relative position so it can be replaced latter
-		itemLink = string_sub(newText, matchPosStart, matchPosEnd)
-		itemLinks[itemLinkNum] = itemLink
-
-		tokenSize = #itemLink
-		tempToken = "{<<" .. tostring(itemLinkNum)
-		tempToken = tempToken .. string_rep(">", tokenSize - #tempToken - 1) .. "}"
-
-		--Replace this itemlink with a temporary placeholder code
-		newText = string_gsub(newText, patt, tempToken, 1)
-
-		itemLinkNum = itemLinkNum + 1
-		matchPosStart, matchPosEnd = string_find(newText, patt)
-	end
-
-	--Try to match, non-colored Item Links
-	patt = "|H.-|h"
-	matchPosStart, matchPosEnd = string_find(newText, patt)
-
-	while matchPosStart ~= nil do
-		--Store the itemlink and it's relative position so it can be replaced latter
-		itemLink = string_sub(newText, matchPosStart, matchPosEnd)
-		itemLinks[itemLinkNum] = itemLink
-
-		tokenSize = #itemLink
-		tempToken = "{<<" .. tostring(itemLinkNum)
-		tempToken = tempToken .. string_rep(">", tokenSize - #tempToken - 1) .. "}"
-
-		--Replace this itemlink with a temporary placeholder code
-		newText = string_gsub(newText, patt, tempToken, 1)
-
-		itemLinkNum = itemLinkNum + 1
-		matchPosStart, matchPosEnd = string_find(newText, patt)
-	end
-
-	--Try to match and textures links.  (i.e. Raid targets and there used when chatting with a GM)
-	patt = "|T.-|t"
-	matchPosStart, matchPosEnd = string_find(newText, patt)
-
-	while matchPosStart ~= nil do
-		--Store the itemlink and it's relative position so it can be replaced latter
-		itemLink = string_sub(newText, matchPosStart, matchPosEnd)
-		itemLinks[itemLinkNum] = itemLink
-
-		tokenSize = #itemLink
-		tempToken = "{<<" .. tostring(itemLinkNum)
-		tempToken = tempToken .. string_rep(">", tokenSize - #tempToken - 1) .. "}"
-
-		--Replace this itemlink with a temporary placeholder code
-		newText = string_gsub(newText, patt, tempToken, 1)
-
-		itemLinkNum = itemLinkNum + 1
-		matchPosStart, matchPosEnd = string_find(newText, patt)
-	end
-
-
-	--Remove the highlighting from any misspelled words.
-	--i.e. When the beginning SPELLED_WRONG_HIGHLIGHT Hex coded color tag and ending |r tag wrap text.
-	--Adjust the cursor position as needed.
-	patt = SPELLED_WRONG_HIGHLIGHT .. "(.-)|r"
-
-	matchPosStart, matchPosEnd = string_find(newText, patt)
-
-	Misspelled:AddToInspector({_patt=string_gsub(patt,"[|]","||"),_newText=string_gsub(newText,"[|]","||"),_matchPosStart=matchPosStart,_matchPosEnd=matchPosEnd},"RemoveHighlighting string.find misspelled highlighting")
-
-	while matchPosStart ~= nil do
-		--strings.gsub(input, pattern, replaceText, n=limit the number of substations to be made)
-		tempText = string_gsub(newText, patt, "%1", 1)
-		--tempText = string_gsub(newText, patt, function(x) return x end, 1)
-
-		if #newText - #tempText ~= 0 then
-			charsRemoved = 0
-			--If the cursor was to the right of the start, subtract the num of deleted chars from the cursor position
-			if cPos >= matchPosStart then
-				charsRemoved = (#newText - #tempText)
-			end
-			--If the cursor was to the left of the end color tag and to the right of the start, add 2
-			if cPos >= matchPosStart and cPos < matchPosEnd then
-				charsRemoved = charsRemoved - 2
-			end
-			cPos = cPos - charsRemoved
-		end
-		newText = tempText
-
-		matchPosStart, matchPosEnd = string_find(newText, patt)
-	end
-
-	--Remove any remaining orphaned beginning color tags.
-	patt = "|[Cc]%x%x%x%x%x%x%x%x"
-	matchPosStart, matchPosEnd = string_find(newText, patt)
-	while matchPosStart ~= nil do
-		tempText = string_gsub(newText, patt, "", 1)
-
-		if #newText - #tempText ~= 0 then
-			--If the cursor was to the right of the start, subtract the num of deleted chars from the cursor position
-			if cPos >= matchPosStart then
-				cPos = cPos - (#newText - #tempText)
-			end
-		end
-		newText = tempText
-
-		matchPosStart, matchPosEnd = string_find(newText, patt)
-	end
-
-	--Remove any remaining orphaned ending color tags.
-	patt = "|r"
-	matchPosStart, matchPosEnd = string_find(newText, patt)
-	while matchPosStart ~= nil do
-		tempText = string_gsub(newText, patt, "", 1)
-
-		if #newText - #tempText ~= 0 then
-			--If the cursor was to the right of the start, subtract the num of deleted chars from the cursor position
-			if cPos >= matchPosStart then
-				cPos = cPos - (#newText - #tempText)
-			end
-		end
-		newText = tempText
-
-		matchPosStart, matchPosEnd = string_find(newText, patt)
-	end
-
-	--Replace back the escape sequences extracted
-	if #itemLinks > 0 then
-		for i,val in ipairs(itemLinks) do
-			newText = string_gsub(newText, "{<<" .. tostring(i) .. ">-}", val)
-		end
-	end
-
-
-	--If by chance the tracked cursor position went negative, set it to 0
-	if cPos < 0 then
-		cPos = 0
-	end
-
-	
-	cleanedChatMessage = newText
-	--cPos should never be > #newText, unless there's some unfound error above
-	return cleanedChatMessage, cPos
-end
-
-function Misspelled:TestRemoveHighlighting()
-	local testMessage
-	local checkMessage
-	local cleanedMessage
-	local newCPos
-	local testResult
-
-	--Test 1
-	testID = "1"
-	testMessage = "Apple"
-	checkMessage= "Apple"
-	cleanedMessage, newCPos = Misspelled:RemoveHighlighting(testMessage, string_len(testMessage))
-
-	local testResults_table = {
-		_testMessage = string_gsub(testMessage,"[|]","||"),
-		_checkMessage = string_gsub(checkMessage,"[|]","||"),
-		_cleanedMessage = string_gsub(cleanedMessage,"[|]","||"),
-		_CPos = string_len(testMessage),
-		_newCPos = newCPos
-	}
-
-	if cleanedMessage == checkMessage then testResult = "passed" else testResult = "failed" end
-    Misspelled:AddToInspector(testResults_table,"Test ".. testResult .. ": RemoveHighlighting "..testID)
-	
-	--Test2 - Misspelled highlighted word: Applez
-	testID = "2"
-	testMessage = "|cff7dc6fbApplez|r"
-	checkMessage= "Applez"
-	cleanedMessage, newCPos = Misspelled:RemoveHighlighting(testMessage, string_len(testMessage))
-
-	local testResults_table = {
-		_testMessage = string_gsub(testMessage,"[|]","||"),
-		_checkMessage = string_gsub(checkMessage,"[|]","||"),
-		_cleanedMessage = string_gsub(cleanedMessage,"[|]","||"),
-		_CPos = string_len(testMessage),
-		_newCPos = newCPos
-	}
-
-	if cleanedMessage == checkMessage then testResult = "passed" else testResult = "failed" end
-    Misspelled:AddToInspector(testResults_table,"Test ".. testResult .. ": RemoveHighlighting "..testID)
-	
-	--Test3 - Misspelled highlighted word: Applez good.
-	testID = "3"
-	testMessage = "|cff7dc6fbApplez|r good."
-	checkMessage= "Applez good."
-	cleanedMessage, newCPos = Misspelled:RemoveHighlighting(testMessage, string_len(testMessage))
-
-	local testResults_table = {
-		_testMessage = string_gsub(testMessage,"[|]","||"),
-		_checkMessage = string_gsub(checkMessage,"[|]","||"),
-		_cleanedMessage = string_gsub(cleanedMessage,"[|]","||"),
-		_CPos = string_len(testMessage),
-		_newCPos = newCPos
-	}
-
-	if cleanedMessage == checkMessage then testResult = "passed" else testResult = "failed" end
-    Misspelled:AddToInspector(testResults_table,"Test ".. testResult .. ": RemoveHighlighting "..testID)
-
-	--Test4 - Correctly spelled word [Link] correctly spelled word
-	testID = "4"
-	testMessage = "Test |cff71d5ff|Hspell:2061:0|h[Flash Heal]|h|r good."
-	checkMessage= "Test |cff71d5ff|Hspell:2061:0|h[Flash Heal]|h|r good."
-	cleanedMessage, newCPos = Misspelled:RemoveHighlighting(testMessage, string_len(testMessage))
-
-	local testResults_table = {
-		_testMessage = string_gsub(testMessage,"[|]","||"),
-		_checkMessage = string_gsub(checkMessage,"[|]","||"),
-		_cleanedMessage = string_gsub(cleanedMessage,"[|]","||"),
-		_CPos = string_len(testMessage),
-		_newCPos = newCPos
-	}
-
-	if cleanedMessage == checkMessage then testResult = "passed" else testResult = "failed" end
-	Misspelled:AddToInspector(testResults_table,"Test ".. testResult .. ": RemoveHighlighting "..testID)
-
-	--Test5 - Correctly spelled word [Spell Link] incorrectly spelled word
-	testID = "5"
-	testMessage = "Test |cff71d5ff|Hspell:2061:0|h[Flash Heal]|h|r |cff7dc6fbbadd|r."
-	checkMessage= "Test |cff71d5ff|Hspell:2061:0|h[Flash Heal]|h|r badd."
-	cleanedMessage, newCPos = Misspelled:RemoveHighlighting(testMessage, string_len(testMessage))
-
-	local testResults_table = {
-		_testMessage = string_gsub(testMessage,"[|]","||"),
-		_checkMessage = string_gsub(checkMessage,"[|]","||"),
-		_cleanedMessage = string_gsub(cleanedMessage,"[|]","||"),
-		_CPos = string_len(testMessage),
-		_newCPos = newCPos
-	}
-
-	if cleanedMessage == checkMessage then testResult = "passed" else testResult = "failed" end
-	Misspelled:AddToInspector(testResults_table,"Test ".. testResult .. ": RemoveHighlighting "..testID)
-
-	--Test6 - Correctly spelled word [Item link]
-	testID = "6"
-	testMessage = "Off-hand: |cffa335ee|Hitem:222566::::::::80:258::13:1:3524:6:40:2249:38:8:45:211296:46:226024:47:222584:48:224072:::::|h[Vagabond's Torch |A:Professions-ChatIcon-Quality-Tier5:17:17::1|a]|h|r"
-	checkMessage= "Off-hand: |cffa335ee|Hitem:222566::::::::80:258::13:1:3524:6:40:2249:38:8:45:211296:46:226024:47:222584:48:224072:::::|h[Vagabond's Torch |A:Professions-ChatIcon-Quality-Tier5:17:17::1|a]|h|r"
-	cleanedMessage, newCPos = Misspelled:RemoveHighlighting(testMessage, string_len(testMessage))
-
-	local testResults_table = {
-		_testMessage = string_gsub(testMessage,"[|]","||"),
-		_checkMessage = string_gsub(checkMessage,"[|]","||"),
-		_cleanedMessage = string_gsub(cleanedMessage,"[|]","||"),
-		_CPos = string_len(testMessage),
-		_newCPos = newCPos
-	}
-
-	if cleanedMessage == checkMessage then testResult = "passed" else testResult = "failed" end
-	Misspelled:AddToInspector(testResults_table,"Test ".. testResult .. ": RemoveHighlighting "..testID)
-	
-	--Test7 - Correctly spelled word [Hex colored Item link] incorrectly spelled word.
-	testID = "7"
-	testMessage = "Off-hand: |cffa335ee|Hitem:222566::::::::80:258::13:1:3524:6:40:2249:38:8:45:211296:46:226024:47:222584:48:224072:::::|h[Vagabond's Torch |A:Professions-ChatIcon-Quality-Tier5:17:17::1|a]|h|r |cff7dc6fbbadd|r."
-	checkMessage= "Off-hand: |cffa335ee|Hitem:222566::::::::80:258::13:1:3524:6:40:2249:38:8:45:211296:46:226024:47:222584:48:224072:::::|h[Vagabond's Torch |A:Professions-ChatIcon-Quality-Tier5:17:17::1|a]|h|r badd."
-	cleanedMessage, newCPos = Misspelled:RemoveHighlighting(testMessage, string_len(testMessage))
-
-	local testResults_table = {
-		_testMessage = string_gsub(testMessage,"[|]","||"),
-		_checkMessage = string_gsub(checkMessage,"[|]","||"),
-		_cleanedMessage = string_gsub(cleanedMessage,"[|]","||"),
-		_CPos = string_len(testMessage),
-		_newCPos = newCPos
-	}
-
-	if cleanedMessage == checkMessage then testResult = "passed" else testResult = "failed" end
-	Misspelled:AddToInspector(testResults_table,"Test ".. testResult .. ": RemoveHighlighting "..testID)
-
-	--Test8 - Correctly spelled word [cnIQ#: colored Item link]
-	testID = "8"
-	testMessage  = "test: |cnIQ2:|Hitem:225566::::::::80:258:::::::::|h[Warped Wing]|h|r"
-	checkMessage = "test: |cnIQ2:|Hitem:225566::::::::80:258:::::::::|h[Warped Wing]|h|r"
-	cleanedMessage, newCPos = Misspelled:RemoveHighlighting(testMessage, string_len(testMessage))
-
-	local testResults_table = {
-		_testMessage = string_gsub(testMessage,"[|]","||"),
-		_checkMessage = string_gsub(checkMessage,"[|]","||"),
-		_cleanedMessage = string_gsub(cleanedMessage,"[|]","||"),
-		_CPos = string_len(testMessage),
-		_newCPos = newCPos
-	}
-
-	if cleanedMessage == checkMessage then testResult = "passed" else testResult = "failed" end
-	Misspelled:AddToInspector(testResults_table,"Test ".. testResult .. ": RemoveHighlighting "..testID)
-
-	--Test9 - Correctly spelled word [cnIQ#: colored Item link] incorrectly spelled word.
-	testID = "9"
-	testMessage  = "test: |cnIQ2:|Hitem:225566::::::::80:258:::::::::|h[Warped Wing]|h|r |cff7dc6fbbadd|r."
-	checkMessage = "test: |cnIQ2:|Hitem:225566::::::::80:258:::::::::|h[Warped Wing]|h|r badd."
-	cleanedMessage, newCPos = Misspelled:RemoveHighlighting(testMessage, string_len(testMessage))
-
-	local testResults_table = {
-		_testMessage = string_gsub(testMessage,"[|]","||"),
-		_checkMessage = string_gsub(checkMessage,"[|]","||"),
-		_cleanedMessage = string_gsub(cleanedMessage,"[|]","||"),
-		_CPos = string_len(testMessage),
-		_newCPos = newCPos
-	}
-
-	if cleanedMessage == checkMessage then testResult = "passed" else testResult = "failed" end
-	Misspelled:AddToInspector(testResults_table,"Test ".. testResult .. ": RemoveHighlighting "..testID)
-end
 
 -------------------------------------------------------------------------
 --
 -- Routines for the right click misspelled suggestions popup.
 --
 -------------------------------------------------------------------------
-function Misspelled:OnMouseUp(editbox, button)
-	if button == "RightButton" then
-		local badWordFound = false
-		CloseDropDownMenus()
 
-		--check if we are positioned on a misspelled word
-		local pos = editbox:GetCursorPosition()
-		if WordLocations[editbox:GetName()] ~= nil then
-			for i, w in ipairs(WordLocations[editbox:GetName()]) do
-				if	pos >= w.StartPos and pos <= w.EndPos then
-					if WordCache[w.Word].Correct == false then
-						--If not cached, lookup Suggestions for the misspelled word
-						if WordCache[w.Word].Suggestions == nil then
-							WordCache[w.Word].Suggestions = WordDict:Suggest(w.Word)
-						end
+--True while Blizzard restricts addons, or is likely to block a chat message that addon code
+--touched: combat, boss encounters, Mythic+, PvP matches and chat messaging lockdown.
+function Misspelled:IsChatEditRestricted()
+	if InCombatLockdown and InCombatLockdown() then return true end
 
-						RightClickedWord = w.Word
-						RightClickedWordStartPos = w.StartPos
-						RightClickedWordEndPos = w.EndPos
+	if C_ChatInfo and C_ChatInfo.InChatMessagingLockdown and C_ChatInfo.InChatMessagingLockdown() then
+		return true
+	end
 
-						RightClickedEditBox = editbox
-
-						badWordFound = true
-
-						ToggleDropDownMenu(1, nil, MisspelledSuggestions_DropDown, "cursor")
-					else
-						RightClickedWord = nil
-					end
-					break
-				end
+	local restrictedActions = C_RestrictedActions
+	if restrictedActions and restrictedActions.IsAddOnRestrictionActive
+		and Enum and type(Enum.AddOnRestrictionType) == "table" then
+		for _, restrictionType in pairs(Enum.AddOnRestrictionType) do
+			if restrictedActions.IsAddOnRestrictionActive(restrictionType) then
+				return true
 			end
 		end
+	end
 
-		--Show where the user right clicked.
-		--print("cursor position:" , ChatFrameEditBox:GetCursorPosition())
-
-		--If we are not positioned on a bad, word call and MouseUp handler that was hooked to the box.
-		if badWordFound == false then
-			--print("Trigger native OnMouseUp call")
-			self.hooks[editbox]["OnMouseUp"](editbox, button)
+	--Be conservative in instanced group content (LFR, LFD, battlegrounds, arenas, keystones),
+	--where chat is restricted as soon as the group forms.
+	if IsInGroup and LE_PARTY_CATEGORY_INSTANCE and IsInGroup(LE_PARTY_CATEGORY_INSTANCE) then
+		return true
+	end
+	if IsInInstance then
+		local _, instanceType = IsInInstance()
+		if instanceType == "raid" or instanceType == "pvp" or instanceType == "arena" then
+			return true
 		end
 	end
-end
-
-function MisspelledSuggestions_InitializeDropDown(level)
-	if RightClickedWord == nil then return end
-	if #RightClickedWord == 0 then return end
-
-	do
-	  local info = UIDropDownMenu_CreateInfo()
-	info.text = L["Suggestions for:"] .. " " .. RightClickedWord
-	info.isTitle = 1
-	info.notClickable = 1
-	info.notCheckable = true
-	UIDropDownMenu_AddButton(info)
+	if C_ChallengeMode and C_ChallengeMode.IsChallengeModeActive and C_ChallengeMode.IsChallengeModeActive() then
+		return true
 	end
 
-	--Add suggestions to the DropDown
-	for i, s in ipairs(WordCache[RightClickedWord].Suggestions) do
-		do
-			local info = UIDropDownMenu_CreateInfo()
-                --Line below causes a this == nil error in 4.0.  Looks like it's not needed.
-		--info.owner = this:GetParent()
+	return false
+end
 
-		--If the misspelled word's first
-		info.text = s.Word
+--True when picking a suggestion may change the text in this edit box right now. Blizzard's
+--chat edit boxes are never changed while addons are restricted: the message would be blocked.
+function Misspelled:CanReplaceWords(editbox)
+	return not (BlizzardChatEditBoxes[editbox] and self:IsChatEditRestricted())
+end
 
+--Builds the entries of the suggestions popup.
+function Misspelled:BuildSuggestionsMenu(editbox, entry)
+	local word = entry.Word
+	local cached = WordCache[word]
+
+	--Suggestions are looked up the first time someone right-clicks the word.
+	if cached.Suggestions == nil then
+		cached.Suggestions = WordDict:Suggest(word) or {}
+	end
+
+	--Suggestions stay listed, so the spelling can still be read, but are greyed out whenever
+	--they can't be used. Checked again while the menu is open and when one is clicked.
+	local function CanReplace()
+		return Misspelled:CanReplaceWords(editbox)
+	end
+
+	local items = {}
+	items[#items + 1] = {text = L["Suggestions for:"] .. " " .. word, isTitle = true}
+	if not CanReplace() then
+		items[#items + 1] = {text = L["Fixing words is paused during combat and encounters"], isTitle = true}
+	end
+
+	for _, suggestion in ipairs(cached.Suggestions) do
+		local suggestedWord = suggestion.Word
+		local label = suggestedWord
 		--If this suggestion is either a guild member or friend append a note.
-		if Misspelled:IsGuildMember(s.Word) == true then
-			info.text = info.text .. " " .. L["(Guild)"]
+		if self:IsGuildMember(suggestedWord) then
+			label = label .. " " .. L["(Guild)"]
+		elseif self:IsFriend(suggestedWord) then
+			label = label .. " " .. L["(Friend)"]
+		end
+		items[#items + 1] = {text = label, enabled = CanReplace, func = function()
+			Misspelled:ReplaceWord(editbox, entry, suggestedWord)
+		end}
+	end
+
+	items[#items + 1] = {isDivider = true}
+	items[#items + 1] = {text = L["Ignore All"], func = function() Misspelled:IgnoreWord(word) end}
+	items[#items + 1] = {text = L["Add to Dictionary"], func = function() Misspelled:AddToUserDict(word) end}
+	items[#items + 1] = {text = L["Cancel"], func = function() end}
+	return items
+end
+
+--[[
+The suggestions popup is built only from Misspelled's own frames. Blizzard's menus (MenuUtil,
+and UIDropDownMenu before it) share one pool of menu frames between every menu. A menu opened
+by addon code creates pooled frames under taint, and when the unit frame's right-click menu
+reuses them, its protected actions are blocked: setting a raid target marker (SetRaidTarget)
+failed with "Misspelled has been blocked from an action only available to the Blizzard UI".
+--]]
+local POPUP_PADDING = 8
+local POPUP_ROW_HEIGHT = 18
+local POPUP_DIVIDER_HEIGHT = 9
+local POPUP_MIN_WIDTH = 140
+
+local Popup
+
+local function PopupRow_OnClick(row)
+	local item = row.item
+	Popup:Hide()
+	if item and item.func and (item.enabled == nil or item.enabled()) then
+		item.func()
+	end
+end
+
+local function Popup_OnEvent(popup, event)
+	if event == "GLOBAL_MOUSE_DOWN" then
+		--Clicking anywhere else closes it, like Blizzard's menus.
+		if not popup:IsMouseOver() then
+			popup:Hide()
+		end
+	else
+		--Combat or an addon restriction started or ended: grey suggestions out, or back in.
+		--Restriction state isn't reported until ADDON_RESTRICTION_STATE_CHANGED has been dispatched.
+		C_Timer.After(0, function() Misspelled:RefreshPopup() end)
+	end
+end
+
+local function Popup_OnShow(popup)
+	popup:RegisterEvent("GLOBAL_MOUSE_DOWN")
+	popup:RegisterEvent("PLAYER_REGEN_DISABLED")
+	popup:RegisterEvent("PLAYER_REGEN_ENABLED")
+	if C_RestrictedActions then
+		popup:RegisterEvent("ADDON_RESTRICTION_STATE_CHANGED")
+	end
+end
+
+local function Popup_OnHide(popup)
+	popup:UnregisterAllEvents()
+	popup.items = nil
+	popup.editbox = nil
+end
+
+local function CreatePopup()
+	local popup = CreateFrame("Frame", "MisspelledSuggestionsPopup", UIParent)
+	popup:SetFrameStrata("FULLSCREEN_DIALOG")
+	popup:SetToplevel(true)
+	popup:SetClampedToScreen(true)
+	popup:EnableMouse(true)
+	popup:Hide()
+
+	local border = popup:CreateTexture(nil, "BACKGROUND")
+	border:SetAllPoints()
+	border:SetColorTexture(0.45, 0.45, 0.45, 1)
+	local background = popup:CreateTexture(nil, "BORDER")
+	background:SetPoint("TOPLEFT", 1, -1)
+	background:SetPoint("BOTTOMRIGHT", -1, 1)
+	background:SetColorTexture(0.05, 0.05, 0.05, 0.95)
+
+	popup.rows = {}
+	popup:SetScript("OnShow", Popup_OnShow)
+	popup:SetScript("OnHide", Popup_OnHide)
+	popup:SetScript("OnEvent", Popup_OnEvent)
+	return popup
+end
+
+local function AcquirePopupRow(popup, index)
+	local row = popup.rows[index]
+	if row == nil then
+		row = CreateFrame("Button", nil, popup)
+		row.text = row:CreateFontString(nil, "ARTWORK", "GameFontHighlight") -- SetText fails without a font
+		row.text:SetPoint("LEFT", 4, 0)
+		row.text:SetJustifyH("LEFT")
+		local highlight = row:CreateTexture(nil, "HIGHLIGHT")
+		highlight:SetAllPoints()
+		highlight:SetColorTexture(1, 1, 1, 0.15)
+		row.line = row:CreateTexture(nil, "ARTWORK")
+		row.line:SetPoint("LEFT", 4, 0)
+		row.line:SetPoint("RIGHT", -4, 0)
+		row.line:SetHeight(1)
+		row.line:SetColorTexture(0.45, 0.45, 0.45, 1)
+		row:SetScript("OnClick", PopupRow_OnClick)
+		popup.rows[index] = row
+	end
+	return row
+end
+
+--Lays out the popup's rows, and greys out the ones that can't be used right now.
+function Misspelled:RefreshPopup()
+	local popup = Popup
+	if popup == nil or popup.items == nil then return end
+
+	local y = -POPUP_PADDING
+	local width = POPUP_MIN_WIDTH
+	for i, item in ipairs(popup.items) do
+		local row = AcquirePopupRow(popup, i)
+		row.item = item
+		row:ClearAllPoints()
+		row:SetPoint("TOPLEFT", popup, "TOPLEFT", POPUP_PADDING, y)
+		row:SetPoint("RIGHT", popup, "RIGHT", -POPUP_PADDING, 0)
+		if item.isDivider then
+			row:SetHeight(POPUP_DIVIDER_HEIGHT)
+			row.text:SetText("")
+			row.line:Show()
+			row:SetEnabled(false)
 		else
-			if Misspelled:IsFriend(s.Word) == true then
-				info.text = info.text .. " " .. L["(Friend)"]
+			local enabled = not item.isTitle and (item.enabled == nil or item.enabled())
+			row:SetHeight(POPUP_ROW_HEIGHT)
+			row.line:Hide()
+			row.text:SetFontObject(item.isTitle and GameFontNormal or (enabled and GameFontHighlight or GameFontDisable))
+			row.text:SetText(item.text)
+			row:SetEnabled(enabled)
+			width = math_max(width, row.text:GetStringWidth() + 2 * POPUP_PADDING + 8)
+		end
+		row:Show()
+		y = y - row:GetHeight()
+	end
+	for i = #popup.items + 1, #popup.rows do
+		popup.rows[i]:Hide()
+	end
+	popup:SetSize(width, POPUP_PADDING - y)
+end
+
+function Misspelled:HideSuggestions(editbox)
+	if Popup and Popup:IsShown() and (editbox == nil or Popup.editbox == editbox) then
+		Popup:Hide()
+	end
+end
+
+function Misspelled:ShowSuggestions(editbox, entry)
+	if WordCache[entry.Word] == nil then return end
+	if Popup == nil then
+		Popup = CreatePopup()
+	end
+
+	Popup:Hide()
+	Popup.items = self:BuildSuggestionsMenu(editbox, entry)
+	Popup.editbox = editbox
+	self:RefreshPopup()
+
+	--Open at the mouse, growing upward from the chat box.
+	local x, y = GetCursorPosition()
+	local scale = Popup:GetEffectiveScale()
+	Popup:ClearAllPoints()
+	Popup:SetPoint("BOTTOMLEFT", UIParent, "BOTTOMLEFT", x / scale, y / scale)
+	Popup:Show()
+end
+
+--Replaces a misspelled word with the suggestion the user picked. Does nothing while the
+--suggestions are greyed out (see CanReplaceWords): the text is left exactly as typed.
+function Misspelled:ReplaceWord(editbox, entry, suggestion)
+	if not self:CanReplaceWords(editbox) then return end
+
+	local text = editbox:GetText()
+	if text == nil or issecretvalue(text) then return end
+
+	--Find the word again, in case the text changed while the menu was open.
+	local startPos, endPos = entry.StartPos, entry.EndPos
+	if string_sub(text, startPos, endPos) ~= entry.Word then
+		startPos, endPos = nil, nil
+		for _, w in ipairs(self:FindMisspelledWords(text)) do
+			if w.Word == entry.Word then
+				startPos, endPos = w.StartPos, w.EndPos
+				break
 			end
 		end
-
-		info.isTitle = nil
-		info.notCheckable = true
-		info.value = s.Word
-		info.func = function() SuggestionsFrame_Click(s.Word, RightClickedEditBox) end
-		--Add the above info to the options menu as clickable item
-		UIDropDownMenu_AddButton(info)
-		end
+		if startPos == nil then return end
 	end
 
-	do
-		--Add a non-clickable separator
-		local info = UIDropDownMenu_CreateInfo()
-	--info.owner = this:GetParent()
-	info.text = ""
-	info.isTitle = nil
-	info.value = ""
-	info.notClickable = 1
-	info.notCheckable = true
-	UIDropDownMenu_AddButton(info)
+	--If the misspelled word was capitalized, capitalize the replacement.
+	local firstChar = string_sub(entry.Word, 1, 1)
+	if firstChar == string_upper(firstChar) then
+		suggestion = string_upper(string_sub(suggestion, 1, 1)) .. string_sub(suggestion, 2)
 	end
 
-	do
-		local info = UIDropDownMenu_CreateInfo()
-	--info.owner = this:GetParent()
-	info.text = L["Ignore All"]
-	info.isTitle = nil
-	info.value = RightClickedWord
-	info.func = function() SuggestionsFrame_Click("###IgnoreAll", RightClickedEditBox) end
-	info.notClickable = nil
-	info.notCheckable = true
-	UIDropDownMenu_AddButton(info)
-	end
+	local newText = string_sub(text, 1, startPos - 1) .. suggestion .. string_sub(text, endPos + 1)
 
-	do
-		local info = UIDropDownMenu_CreateInfo()
-	--info.owner = this:GetParent()
-	info.text = L["Add to Dictionary"]
-	info.isTitle = nil
-	info.value = RightClickedWord
-	info.func = function() SuggestionsFrame_Click("###AddToDictionary", RightClickedEditBox) end
-	info.notClickable = nil
-	info.notCheckable = true
-	UIDropDownMenu_AddButton(info)
-	end
-
-	do
-		local info = UIDropDownMenu_CreateInfo()
-	--info.owner = this:GetParent()
-	info.text = L["Cancel"]
-	info.isTitle = nil
-	info.value = nil
-	info.notClickable = nil
-	info.notCheckable = true
-	UIDropDownMenu_AddButton(info)
-	end
-end
-
-function MisspelledSuggestions_DropDownOnLoad(self)
-	UIDropDownMenu_Initialize(self, MisspelledSuggestions_InitializeDropDown, "MENU")
-end
-
-function SuggestionsFrame_Click(value, editbox)
-	--value will equal the suggestion word clicked,
-	--or a "special" tag, for the 'Ignore' and 'Add to Dictionary' functions
-
-	--print("Suggestion Clicked: ", value)
-
-	local newText = editbox:GetText()
-	local newCursorPos = nil
-
-	local isCapitalizedRightClickedWord = false
-
-	--Check if the local (global) var RightClickedWord is populated with a non nil value
-    assert(RightClickedWord ~= nil, "Misspelled: SuggestionsFrame_Click, Unexpected: RightClickedWord == nil")
-
-	if string_sub(RightClickedWord, 1, 1) == string_upper(string_sub(RightClickedWord, 1, 1)) then
-		isCapitalizedRightClickedWord = true
-	end
-
-	if value == "###IgnoreAll" then
-		--Add this word to the WordCache so it will be ignored as misspelled until you reload
-		--print("Ignore:", RightClickedWord)
-		WordCache[RightClickedWord].Correct = true
-		WordCache[RightClickedWord].Suggestions = {}
-
-		--Remove the misspelled highlighting
-		newText = string_sub(newText, 1, RightClickedWordStartPos - 1 - #SPELLED_WRONG_HIGHLIGHT) .. RightClickedWord .. string_sub(newText, RightClickedWordEndPos + #FONT_COLOR_CODE_CLOSE + 1)
-		newCursorPos = RightClickedWordStartPos + #RightClickedWord - #SPELLED_WRONG_HIGHLIGHT - #FONT_COLOR_CODE_CLOSE + 1
-
-	elseif value == "###AddToDictionary" then
-		-- Add this word to the user dictionary
-		--print("Add to UserDict", RightClickedWord)
-		Misspelled:AddToUserDict(RightClickedWord)
-		WordCache[RightClickedWord].Correct = true
-		WordCache[RightClickedWord].Suggestions = {}
-
-		--Remove the misspelled highlighting
-		newText = string_sub(newText, 1, RightClickedWordStartPos - 1 - #SPELLED_WRONG_HIGHLIGHT) .. RightClickedWord .. string_sub(newText, RightClickedWordEndPos + #FONT_COLOR_CODE_CLOSE + 1)
-		newCursorPos = RightClickedWordStartPos + #RightClickedWord - #SPELLED_WRONG_HIGHLIGHT - #FONT_COLOR_CODE_CLOSE + 1
-
-	else
-		--replace this word with the selected suggestion.
-		--Remove the misspelled highlighting in the process.
-		--
-		--If the misspelled word was capitalized, capitalize the replacement.
-		if isCapitalizedRightClickedWord == true then
-			value = string_upper(string_sub(value, 1, 1)) .. string_sub(value, 2)
-		end
-		newText = string_sub(newText, 1, RightClickedWordStartPos - 1 - #SPELLED_WRONG_HIGHLIGHT) .. value .. string_sub(newText, RightClickedWordEndPos + #FONT_COLOR_CODE_CLOSE + 1)
-
-		--save the cursor position just after the corrected word, so we can set it later
-		newCursorPos = RightClickedWordStartPos + #value - #SPELLED_WRONG_HIGHLIGHT - #FONT_COLOR_CODE_CLOSE + 1
-
-		--Note: if the replacement word is a different length, then the WordLocations will be messed up.
+	--Move the cursor to the end of the new word, past a following space.
+	local newCursorPos = startPos - 1 + #suggestion
+	if string_sub(newText, newCursorPos + 1, newCursorPos + 1) == " " then
+		newCursorPos = newCursorPos + 1
 	end
 
 	editbox:SetText(newText)
+	editbox:SetCursorPosition(newCursorPos)
+end
 
-	--printable = gsub(newText, "\124", "\124\124")  --\124 == "|"
-    --print("New ChatText:", printable)
-
-	--If we replaced a word, with a suggestion, move the cursor to the end of the new word.
-	if newCursorPos ~= nil then
-		--Check if the character to the right of the cursor is a space.  If so adjust the cursor to the right by 1 char.
-		if #newText > newCursorPos then
-			if string_sub(newText, newCursorPos + 1, newCursorPos + 1) == " " then
-				newCursorPos = newCursorPos + 1
-			end
-		end
-
-		editbox:SetCursorPosition(newCursorPos)
+function Misspelled:IgnoreWord(word)
+	--Add this word to the WordCache so it will be ignored as misspelled until you reload
+	local cached = WordCache[word]
+	if cached == nil then
+		cached = {}
+		WordCache[word] = cached
+		WordCacheCount = WordCacheCount + 1
 	end
-
-	RightClickedWord = nil
+	cached.Correct = true
+	cached.Suggestions = {}
+	self:RecheckAll()
 end
 -----------------------------------------------------
 -- End: Right click Suggestions popup
@@ -1268,6 +919,16 @@ end
 -- Routines for dealing with the user dictionary
 --
 -------------------------------------------------------------------------
+
+--Returns the "sounds like" code the loaded dictionary uses for suggestions.
+local function SoundsLikeCode(word)
+	if WordDict.soundslike == WordDict.Const.SoundslikeAlgorithms.PHONETIC then
+		return WordDict:PhoneticCode(word)
+	elseif WordDict.soundslike == WordDict.Const.SoundslikeAlgorithms.GENERIC then
+		return WordDict:GenericSoundsLike(word)
+	end
+	return ""
+end
 
 --Load the words saved in the Users dictionary into the baseWords table.
 --In r18 we changed the in memory format used to store the baseWords, affixCode and PhoneticCode,
@@ -1309,25 +970,23 @@ function Misspelled:AddToUserDict(word)
 		Misspelled_DB.UserDict = {}
 	end
 	--Add the new word to the UserDict saved variable
-	local pcode = WordDict:PhoneticCode(word)
-	Misspelled_DB.UserDict[word] = "/" .. pcode
+	local code = "/" .. SoundsLikeCode(word)
+	Misspelled_DB.UserDict[word] = code
 
 	--And add it to the currently loaded dictionary
-	WordDict.baseWords[word] = "/" .. pcode
+	WordDict.baseWords[word] = code
 
 	--Fixup the WordCache
-	WordCache[word].Correct = true
-	WordCache[word].Suggestions = {}
+	WordCache[word] = {Correct = true, Suggestions = {}}
+	self:RecheckAll()
 end
 
 
 local Misspelled_Words_To_Delete = {}
 
 function Misspelled:EditUserDict()
-	local gui = AceGUI
-
 	local f = AceGUI:Create("Window")
-	f:SetCallback("OnClose",function(widget, event) AceGUI:Release(widget) end )
+	f:SetCallback("OnClose", function(widget) AceGUI:Release(widget) end)
 	f:SetLayout("Flow")
 	f:SetWidth(300)
 	f:SetHeight(490)
@@ -1335,10 +994,9 @@ function Misspelled:EditUserDict()
 	f:ReleaseChildren()
 	f:PauseLayout()
 
-
 	Misspelled_Words_To_Delete = {}
 
-	local i = gui:Create("InlineGroup")
+	local i = AceGUI:Create("InlineGroup")
 	i:SetLayout("List")
 	i:SetFullWidth(true)
 	i:SetHeight(370)
@@ -1357,7 +1015,7 @@ function Misspelled:EditUserDict()
 		PlaySound(856) -- SOUNDKIT.IG_MAINMENU_OPTION_CHECKBOX_ON
 		--Delete selected words from the user dictionary
 		Misspelled:print("Misspelled: " .. L["Removing the following words from the user dictionary"])
-		for k,v in pairs(Misspelled_Words_To_Delete) do
+		for k in pairs(Misspelled_Words_To_Delete) do
 			Misspelled:print(" - " .. k)
 			Misspelled_DB.UserDict[k] = nil
 
@@ -1368,10 +1026,11 @@ function Misspelled:EditUserDict()
 		--Clear the word cache
 		WordCache = {}
 		WordCacheCount = 0
+		Misspelled:RecheckAll()
 
 		delButton:SetDisabled(true)
 		f:Hide()
-	end )
+	end)
 	delButton:SetDisabled(true)
 
 	f:AddChild(delButton)
@@ -1384,43 +1043,31 @@ function Misspelled:EditUserDict()
 		Misspelled_DB.UserDict = {}
 	end
 
-	for k, v in pairs(Misspelled_DB.UserDict) do
+	for k in pairs(Misspelled_DB.UserDict) do
 		local x = AceGUI:Create("InteractiveLabel")
-		x:SetHighlight(.3,.3,.3,.5  )
+		x:SetHighlight(.3, .3, .3, .5)
 		x:SetFullWidth(true)
 		x:SetText(k)
 
-		x:SetCallback("OnClick", function (widget, event, text)
-			--print("Clicked: " .. widget.label:GetText())
-
+		x:SetCallback("OnClick", function(widget)
 			PlaySound(856) -- SOUNDKIT.IG_MAINMENU_OPTION_CHECKBOX_ON
 			--Check if item is selected or not
-			local r,g,b,a = widget.label:GetTextColor()
+			local _, _, b = widget.label:GetTextColor()
 
 			if b == 0 then
 				--Selected, process an unselect
-				widget:SetColor(1,1,1,1)
+				widget:SetColor(1, 1, 1, 1)
 				Misspelled_Words_To_Delete[widget.label:GetText()] = nil
-				local x = 0
-				for k,v in pairs(Misspelled_Words_To_Delete) do
-					x = x + 1
-				end
-
-				if x == 0 then
-					delButton:SetDisabled(true)
-				else
-					delButton:SetDisabled(false)
-				end
+				delButton:SetDisabled(next(Misspelled_Words_To_Delete) == nil)
 			else	--Unselected, process a select
-				widget:SetColor(1,.2,0,1)
+				widget:SetColor(1, .2, 0, 1)
 				Misspelled_Words_To_Delete[widget.label:GetText()] = 1
 				delButton:SetDisabled(false)
 			end
-		end )
+		end)
 
 		scroll:AddChild(x)
 	end
-
 
 	f:ResumeLayout()
 	f:DoLayout()
@@ -1439,69 +1086,74 @@ end
 --
 -------------------------------------------------------------------------
 
---Load the player's guild members and friends, as valid words into the
---loaded dictionary.
-function Misspelled:LoadGuildAndFriendRoster()
+--Adds a player's name to the loaded dictionary as valid words. Names can carry a realm, or on
+--WoW Forever a surname ("Name-Realm", "First-Surname" or "First Surname"), so each part is added.
+--Returns true if a new word was added.
+local function AddPlayerName(fullName, names)
+	if issecretvalue(fullName) or type(fullName) ~= "string" then return false end
 
-	local numFriends, f --FriendInfo (https://warcraft.wiki.gg/wiki/API_C_FriendList.GetFriendInfo)
-	local pcode
-
-	--print("Misspelled: Friends names and guild members loading...")
-
-	--First check your friends list
-	if C_FriendList.GetNumFriends ~= nil then
-		numFriends = C_FriendList.GetNumFriends()
-		if numFriends > 0 then
-			for i = 1, numFriends do
-				f = C_FriendList.GetFriendInfoByIndex(i)
-				if f ~= nil then
-					if #f.name > 0 then
-						if WordDict:Contains(f.name) == false then
-							--Look up the phonetic code for this friend name
-							if WordDict.soundslike == WordDict.Const.SoundslikeAlgorithms.PHONETIC then
-								pcode = WordDict:PhoneticCode(f.name)
-							elseif WordDict.soundslike == WordDict.Const.SoundslikeAlgorithms.GENERIC then
-								pcode = WordDict:GenericSoundsLike(f.name)
-							else
-								pcode = ""
-							end
-							--Add the friend name to the loaded dictionary
-							WordDict.baseWords[f.name] = "/" .. pcode
-						end
-					end
-				end
-			end
+	local added = false
+	for part in string_gmatch(fullName, "[^%-%s]+") do
+		names[part] = true
+		if WordDict.baseWords[part] == nil and not WordDict:Contains(part) then
+			WordDict.baseWords[part] = "/" .. SoundsLikeCode(part)
+			added = true
 		end
 	end
+	return added
+end
 
-	-- Guild members are valid words.
-	local numTotalInGuild, guildMemberName
-	if GetNumGuildMembers() ~= 0 then
-		numTotalInGuild = GetNumGuildMembers()
-		if ( numTotalInGuild > 0 ) then
-			for i=1, numTotalInGuild do
-				guildMemberName = GetGuildRosterInfo(i);
-				if guildMemberName ~= nil then
-					if #guildMemberName ~= 0 then
-						if WordDict:Contains(guildMemberName) == false then
-							--Look up the phonetic code for this guild member name
-							if WordDict.soundslike == WordDict.Const.SoundslikeAlgorithms.PHONETIC then
-								pcode = WordDict:PhoneticCode(guildMemberName)
-							elseif WordDict.soundslike == WordDict.Const.SoundslikeAlgorithms.GENERIC then
-								pcode = WordDict:GenericSoundsLike(guildMemberName)
-							else
-								pcode = ""
-							end
-							--Add the guild member to the loaded dictionary
-							WordDict.baseWords[guildMemberName] = "/" .. pcode
-						end
-					end
-				end
-			end
+--Names checked before they were added may be cached as misspelled.
+local function NamesAdded()
+	WordCache = {}
+	WordCacheCount = 0
+	Misspelled:RecheckAll()
+end
+
+function Misspelled:LoadFriends()
+	if not (C_FriendList and C_FriendList.GetNumFriends) then return end
+
+	local numFriends = C_FriendList.GetNumFriends()
+	if numFriends == nil or issecretvalue(numFriends) then return end
+
+	local added = false
+	for i = 1, numFriends do
+		local friendInfo = C_FriendList.GetFriendInfoByIndex(i)
+		if friendInfo and AddPlayerName(friendInfo.name, FriendNames) then
+			added = true
 		end
-		--print("Misspelled: Guild Members Loaded")
-		Misspelled:UnregisterEvent("GUILD_ROSTER_UPDATE")
 	end
+	if added then
+		NamesAdded()
+	end
+end
+
+function Misspelled:LoadGuildRoster()
+	if not (IsInGuild and IsInGuild() and GetNumGuildMembers and GetGuildRosterInfo) then return end
+
+	local numGuildMembers = GetNumGuildMembers()
+	if numGuildMembers == nil or issecretvalue(numGuildMembers) or numGuildMembers == 0 then return end
+
+	local added = false
+	for i = 1, numGuildMembers do
+		if AddPlayerName((GetGuildRosterInfo(i)), GuildNames) then
+			added = true
+		end
+	end
+	if added then
+		NamesAdded()
+	end
+
+	--The roster is only loaded once per session.
+	self:UnregisterEvent("GUILD_ROSTER_UPDATE")
+end
+
+function Misspelled:IsFriend(name)
+	return FriendNames[name] == true
+end
+
+function Misspelled:IsGuildMember(name)
+	return GuildNames[name] == true
 end
 
 -------------------------------------------------------------------------
@@ -1509,251 +1161,80 @@ end
 -------------------------------------------------------------------------
 
 --[[ Interface Options Window ]]--
+local DICTIONARIES = {"deDE", "enGB", "enUS", "esES", "frFR", "itIT", "ruRU"}
+
+local function CreateCheckbox(parent, name, label, x, y)
+	local checkbox = CreateFrame("CheckButton", name, parent, "UICheckButtonTemplate")
+	checkbox:SetSize(26, 26)
+	checkbox:SetPoint("TOPLEFT", x, y)
+	local text = checkbox.Text or checkbox.text or _G[name .. "Text"]
+	if text then
+		text:SetFontObject("GameFontHighlight")
+		text:SetText(label)
+	end
+	return checkbox
+end
+
 function Misspelled:CreateInterfaceOptions()
-	local cfgFrame = CreateFrame("FRAME", nil, UIParent)
+	local cfgFrame = CreateFrame("Frame", nil, UIParent)
 	cfgFrame.name = "Misspelled"
 
-	local cfgFrameHeader = cfgFrame:CreateFontString("OVERLAY", nil, "GameFontNormalLarge")
+	local cfgFrameHeader = cfgFrame:CreateFontString(nil, "OVERLAY", "GameFontNormalLarge")
 	cfgFrameHeader:SetPoint("TOPLEFT", 15, -15)
-	cfgFrameHeader:SetText(self.Version)
+	cfgFrameHeader:SetText("Misspelled " .. tostring(self.Version))
 
-	local cfgFrameReloadTip = cfgFrame:CreateFontString("OVERLAY", nil, "GameFontNormal")
-	cfgFrameReloadTip:SetPoint("TOPLEFT", 20, -252)
+	local dictCheckboxes = {}
+
+	local function UpdateDictionaryCheckboxes()
+		for dict, checkbox in pairs(dictCheckboxes) do
+			checkbox:SetChecked(Misspelled_DB.LoadDictionary == dict)
+			checkbox:SetEnabled(Misspelled_DB.AutoSelectDictionary ~= true)
+		end
+	end
+
+	local cfgAutoSelectDict = CreateCheckbox(cfgFrame, "Misspelled_cfgAutoSelectDict", L["Auto Select Dictionary to Load"], 20, -40)
+	cfgAutoSelectDict:SetChecked(Misspelled_DB.AutoSelectDictionary)
+	cfgAutoSelectDict:SetScript("OnClick", function(checkbox)
+		PlaySound(checkbox:GetChecked() and 856 or 857) -- SOUNDKIT.IG_MAINMENU_OPTION_CHECKBOX_ON / OFF
+		Misspelled_DB.AutoSelectDictionary = checkbox:GetChecked() and true or false
+		if Misspelled_DB.LoadDictionary == nil or #Misspelled_DB.LoadDictionary == 0 then
+			Misspelled_DB.LoadDictionary = "enUS"
+		end
+		UpdateDictionaryCheckboxes()
+	end)
+
+	--One dictionary can be picked, so these behave like radio buttons.
+	for i, dict in ipairs(DICTIONARIES) do
+		local checkbox = CreateCheckbox(cfgFrame, "Misspelled_cfgDict" .. dict, dict, 40, -40 - 24 * i)
+		checkbox:SetScript("OnClick", function()
+			PlaySound(856) -- SOUNDKIT.IG_MAINMENU_OPTION_CHECKBOX_ON
+			Misspelled_DB.LoadDictionary = dict
+			UpdateDictionaryCheckboxes()
+		end)
+		dictCheckboxes[dict] = checkbox
+	end
+	UpdateDictionaryCheckboxes()
+
+	local cfgFrameReloadTip = cfgFrame:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+	cfgFrameReloadTip:SetPoint("TOPLEFT", 20, -52 - 24 * #DICTIONARIES - 20)
 	cfgFrameReloadTip:SetText(L["Note: reload the game UI to load a different selected dictionary"])
 
-	local cfgAutoSelectDict = CreateFrame("CHECKBUTTON", "Misspelled_cfgAutoSelectDict", cfgFrame, "InterfaceOptionsCheckButtonTemplate")
-	Misspelled_cfgAutoSelectDict:SetPoint("TOPLEFT", 20, -40)
-	Misspelled_cfgAutoSelectDictText:SetText(L["Auto Select Dictionary to Load"])
-	Misspelled_cfgAutoSelectDict:SetChecked(Misspelled_DB.AutoSelectDictionary )
-	Misspelled_cfgAutoSelectDict:SetScript("OnClick", function(self)
-		if self:GetChecked() then
-			PlaySound(856) -- SOUNDKIT.IG_MAINMENU_OPTION_CHECKBOX_ON
-		else
-			PlaySound(857) -- SOUNDKIT.IG_MAINMENU_OPTION_CHECKBOX_OFF
-		end
-		Misspelled_DB.AutoSelectDictionary  = not Misspelled_DB.AutoSelectDictionary
-		--Toggle the sub options
-		if Misspelled_DB.AutoSelectDictionary == true then
-			Misspelled_cfgDictdeDE:Disable()
-			Misspelled_cfgDictenGB:Disable()
-			Misspelled_cfgDictenUS:Disable()
-			Misspelled_cfgDictesES:Disable()
-			Misspelled_cfgDictfrFR:Disable()
-			Misspelled_cfgDictruRU:Disable()
-			Misspelled_cfgDictitIT:Disable()
-		else
-			Misspelled_cfgDictdeDE:Enable()
-			Misspelled_cfgDictenGB:Enable()
-			Misspelled_cfgDictenUS:Enable()
-			Misspelled_cfgDictesES:Enable()
-			Misspelled_cfgDictfrFR:Enable()
-			Misspelled_cfgDictruRU:Enable()
-			Misspelled_cfgDictitIT:Enable()
-			if Misspelled_DB.LoadDictionary == nil or #Misspelled_DB.LoadDictionary == 0 then
-				Misspelled_DB.LoadDictionary = "enUS"
-				Misspelled_cfgDictenUS:SetChecked(true)
-			end
-		end
-	end)
-
-	local cfgDictdeDE = CreateFrame("CHECKBUTTON", "Misspelled_cfgDictdeDE", cfgFrame, "InterfaceOptionsCheckButtonTemplate")
-	Misspelled_cfgDictdeDE:SetPoint("TOPLEFT", 40, -64)
-	Misspelled_cfgDictdeDEText:SetText("deDE")
-	Misspelled_cfgDictdeDE:SetChecked(Misspelled_DB.LoadDictionary == "deDE")
-	Misspelled_cfgDictdeDE:SetScript("OnClick", function(self)
-		if self:GetChecked() then
-			PlaySound(856) -- SOUNDKIT.IG_MAINMENU_OPTION_CHECKBOX_ON
-			Misspelled_DB.LoadDictionary = "deDE"
-			Misspelled_cfgDictenGB:SetChecked(false)
-			Misspelled_cfgDictenUS:SetChecked(false)
-			Misspelled_cfgDictesES:SetChecked(false)
-			Misspelled_cfgDictfrFR:SetChecked(false)
-			Misspelled_cfgDictruRU:SetChecked(false)
-			Misspelled_cfgDictitIT:SetChecked(false)
-		else
-			PlaySound(857) -- SOUNDKIT.IG_MAINMENU_OPTION_CHECKBOX_OFF
-		end
-	end)
-
-	local cfgDictenGB = CreateFrame("CHECKBUTTON", "Misspelled_cfgDictenGB", cfgFrame, "InterfaceOptionsCheckButtonTemplate")
-	Misspelled_cfgDictenGB:SetPoint("TOPLEFT", 40, -88)
-	Misspelled_cfgDictenGBText:SetText("enGB")
-	Misspelled_cfgDictenGB:SetChecked(Misspelled_DB.LoadDictionary == "enGB")
-	Misspelled_cfgDictenGB:SetScript("OnClick", function(self)
-		if self:GetChecked() then
-			PlaySound(856) -- SOUNDKIT.IG_MAINMENU_OPTION_CHECKBOX_ON
-			Misspelled_DB.LoadDictionary = "enGB"
-			Misspelled_cfgDictdeDE:SetChecked(false)
-			Misspelled_cfgDictenUS:SetChecked(false)
-			Misspelled_cfgDictesES:SetChecked(false)
-			Misspelled_cfgDictfrFR:SetChecked(false)
-			Misspelled_cfgDictruRU:SetChecked(false)
-			Misspelled_cfgDictitIT:SetChecked(false)
-		else
-			PlaySound(857) -- SOUNDKIT.IG_MAINMENU_OPTION_CHECKBOX_OFF
-		end
-	end)
-
-	local cfgDictenUS = CreateFrame("CHECKBUTTON", "Misspelled_cfgDictenUS", cfgFrame, "InterfaceOptionsCheckButtonTemplate")
-	Misspelled_cfgDictenUS:SetPoint("TOPLEFT", 40, -112)
-	Misspelled_cfgDictenUSText:SetText("enUS")
-	Misspelled_cfgDictenUS:SetChecked(Misspelled_DB.LoadDictionary == "enUS")
-	Misspelled_cfgDictenUS:SetScript("OnClick", function(self)
-		if self:GetChecked() then
-			PlaySound(856) -- SOUNDKIT.IG_MAINMENU_OPTION_CHECKBOX_ON
-			Misspelled_DB.LoadDictionary = "enUS"
-			Misspelled_cfgDictdeDE:SetChecked(false)
-			Misspelled_cfgDictenGB:SetChecked(false)
-			Misspelled_cfgDictesES:SetChecked(false)
-			Misspelled_cfgDictfrFR:SetChecked(false)
-			Misspelled_cfgDictruRU:SetChecked(false)
-			Misspelled_cfgDictitIT:SetChecked(false)
-		else
-			PlaySound(857) -- SOUNDKIT.IG_MAINMENU_OPTION_CHECKBOX_OFF
-		end
-	end)
-
-	local cfgDictesES = CreateFrame("CHECKBUTTON", "Misspelled_cfgDictesES", cfgFrame, "InterfaceOptionsCheckButtonTemplate")
-	Misspelled_cfgDictesES:SetPoint("TOPLEFT", 40, -136)
-	Misspelled_cfgDictesESText:SetText("esES")
-	Misspelled_cfgDictesES:SetChecked(Misspelled_DB.LoadDictionary == "esES")
-	Misspelled_cfgDictesES:SetScript("OnClick", function(self)
-		if self:GetChecked() then
-			PlaySound(856) -- SOUNDKIT.IG_MAINMENU_OPTION_CHECKBOX_ON
-			Misspelled_DB.LoadDictionary = "esES"
-			Misspelled_cfgDictdeDE:SetChecked(false)
-			Misspelled_cfgDictenGB:SetChecked(false)
-			Misspelled_cfgDictenUS:SetChecked(false)
-			Misspelled_cfgDictfrFR:SetChecked(false)
-			Misspelled_cfgDictruRU:SetChecked(false)
-			Misspelled_cfgDictitIT:SetChecked(false)
-		else
-			PlaySound(857) -- SOUNDKIT.IG_MAINMENU_OPTION_CHECKBOX_OFF
-		end
-
-	end)
-
-	local cfgDictfrFR = CreateFrame("CHECKBUTTON", "Misspelled_cfgDictfrFR", cfgFrame, "InterfaceOptionsCheckButtonTemplate")
-	Misspelled_cfgDictfrFR:SetPoint("TOPLEFT", 40, -160)
-	Misspelled_cfgDictfrFRText:SetText("frFR")
-	Misspelled_cfgDictfrFR:SetChecked(Misspelled_DB.LoadDictionary == "frFR")
-	Misspelled_cfgDictfrFR:SetScript("OnClick", function(self)
-		if self:GetChecked() then
-			PlaySound(856) -- SOUNDKIT.IG_MAINMENU_OPTION_CHECKBOX_ON
-			Misspelled_DB.LoadDictionary = "frFR"
-			Misspelled_cfgDictdeDE:SetChecked(false)
-			Misspelled_cfgDictenGB:SetChecked(false)
-			Misspelled_cfgDictenUS:SetChecked(false)
-			Misspelled_cfgDictesES:SetChecked(false)
-			Misspelled_cfgDictruRU:SetChecked(false)
-			Misspelled_cfgDictitIT:SetChecked(false)
-		else
-			PlaySound(857) -- SOUNDKIT.IG_MAINMENU_OPTION_CHECKBOX_OFF
-		end
-
-	end)
-
-	local cfgDictruRU = CreateFrame("CHECKBUTTON", "Misspelled_cfgDictruRU", cfgFrame, "InterfaceOptionsCheckButtonTemplate")
-	Misspelled_cfgDictruRU:SetPoint("TOPLEFT", 40, -184)
-	Misspelled_cfgDictruRUText:SetText("ruRU")
-	Misspelled_cfgDictruRU:SetChecked(Misspelled_DB.LoadDictionary == "ruRU")
-	Misspelled_cfgDictruRU:SetScript("OnClick", function(self)
-		if self:GetChecked() then
-			PlaySound(856) -- SOUNDKIT.IG_MAINMENU_OPTION_CHECKBOX_ON
-			Misspelled_DB.LoadDictionary = "ruRU"
-			Misspelled_cfgDictdeDE:SetChecked(false)
-			Misspelled_cfgDictenGB:SetChecked(false)
-			Misspelled_cfgDictenUS:SetChecked(false)
-			Misspelled_cfgDictfrFR:SetChecked(false)
-			Misspelled_cfgDictesES:SetChecked(false)
-			Misspelled_cfgDictitIT:SetChecked(false)
-		else
-			PlaySound(857) -- SOUNDKIT.IG_MAINMENU_OPTION_CHECKBOX_OFF
-		end
-
-	end)
-
-	local cfgDictitIT = CreateFrame("CHECKBUTTON", "Misspelled_cfgDictitIT", cfgFrame, "InterfaceOptionsCheckButtonTemplate")
-	Misspelled_cfgDictitIT:SetPoint("TOPLEFT", 40, -208)
-	Misspelled_cfgDictitITText:SetText("itIT")
-	Misspelled_cfgDictitIT:SetChecked(Misspelled_DB.LoadDictionary == "itIT")
-	Misspelled_cfgDictitIT:SetScript("OnClick", function(self)
-		if self:GetChecked() then
-			PlaySound(856) -- SOUNDKIT.IG_MAINMENU_OPTION_CHECKBOX_ON
-			Misspelled_DB.LoadDictionary = "itIT"
-			Misspelled_cfgDictdeDE:SetChecked(false)
-			Misspelled_cfgDictenGB:SetChecked(false)
-			Misspelled_cfgDictenUS:SetChecked(false)
-			Misspelled_cfgDictfrFR:SetChecked(false)
-			Misspelled_cfgDictesES:SetChecked(false)
-			Misspelled_cfgDictruRU:SetChecked(false)
-		else
-			PlaySound(857) -- SOUNDKIT.IG_MAINMENU_OPTION_CHECKBOX_OFF
-		end
-
-	end)
-
 	--Edit User Dictionary Button
-	local cfgEditUserDict = CreateFrame("Button", "EdutUserDictButton", cfgFrame, "UIPanelButtonTemplate")
-        cfgEditUserDict:SetPoint("TOPLEFT", 20, -287)
-        cfgEditUserDict:SetText(L["Edit User Dictionary..."])
-	cfgEditUserDict:SetWidth(200)
-	cfgEditUserDict:SetHeight(24)
-	cfgEditUserDict:SetScript("OnClick", function(self)
-		--PlaySound("igMainMenuOptionCheckBoxOn")
+	local cfgEditUserDict = CreateFrame("Button", "Misspelled_cfgEditUserDict", cfgFrame, "UIPanelButtonTemplate")
+	cfgEditUserDict:SetPoint("TOPLEFT", cfgFrameReloadTip, "BOTTOMLEFT", 0, -16)
+	cfgEditUserDict:SetText(L["Edit User Dictionary..."])
+	cfgEditUserDict:SetSize(200, 24)
+	cfgEditUserDict:SetScript("OnClick", function()
 		Misspelled:EditUserDict()
 	end)
 
-	--set options on startup
-	Misspelled_cfgDictdeDE:SetChecked(false)
-	Misspelled_cfgDictenUS:SetChecked(false)
-	Misspelled_cfgDictenGB:SetChecked(false)
-	Misspelled_cfgDictesES:SetChecked(false)
-	Misspelled_cfgDictfrFR:SetChecked(false)
-	Misspelled_cfgDictruRU:SetChecked(false)
-	Misspelled_cfgDictitIT:SetChecked(false)
-
-	if Misspelled_DB.LoadDictionary == "deDE" then
-		Misspelled_cfgDictdeDE:SetChecked(true)
-	elseif Misspelled_DB.LoadDictionary == "enGB" then
-		Misspelled_cfgDictenGB:SetChecked(true)
-	elseif Misspelled_DB.LoadDictionary == "enUS" then
-		Misspelled_cfgDictenUS:SetChecked(true)
-	elseif Misspelled_DB.LoadDictionary == "esES" then
-		Misspelled_cfgDictesES:SetChecked(true)
-	elseif Misspelled_DB.LoadDictionary == "frFR" then
-		Misspelled_cfgDictfrFR:SetChecked(true)
-	elseif Misspelled_DB.LoadDictionary == "ruRU" then
-		Misspelled_cfgDictruRU:SetChecked(true)
-	elseif Misspelled_DB.LoadDictionary == "itIT" then
-		Misspelled_cfgDictitIT:SetChecked(true)
-	end
-
-	if Misspelled_DB.AutoSelectDictionary == true then
-			Misspelled_cfgDictdeDE:Disable()
-			Misspelled_cfgDictenGB:Disable()
-			Misspelled_cfgDictenUS:Disable()
-			Misspelled_cfgDictesES:Disable()
-			Misspelled_cfgDictfrFR:Disable()
-			Misspelled_cfgDictruRU:Disable()
-			Misspelled_cfgDictitIT:Disable()
-	else
-			Misspelled_cfgDictdeDE:Enable()
-			Misspelled_cfgDictenGB:Enable()
-			Misspelled_cfgDictenUS:Enable()
-			Misspelled_cfgDictesES:Enable()
-			Misspelled_cfgDictfrFR:Enable()
-			Misspelled_cfgDictruRU:Enable()
-			Misspelled_cfgDictitIT:Enable()
-	end
-
 	--Add options frame to the list of in-game addon options
-	--Adding addon options changed in Wow 11.0
-	if InterfaceOptions_AddCategory then -- Check for compatiability for older Wow clients.
-		InterfaceOptions_AddCategory(cfgFrame)  -- For Wow clients < v11
-	elseif Settings then -- For Wow clients > v11
-		local category, layout = Settings.RegisterCanvasLayoutCategory(cfgFrame, cfgFrame.name)
+	if Settings and Settings.RegisterCanvasLayoutCategory then -- Wow 11+, Midnight, WoW Forever
+		local category = Settings.RegisterCanvasLayoutCategory(cfgFrame, cfgFrame.name)
 		Settings.RegisterAddOnCategory(category)
+		self.settingsCategory = category
+	elseif InterfaceOptions_AddCategory then -- For Wow clients < v11
+		InterfaceOptions_AddCategory(cfgFrame)
 	end
 end
 
@@ -1764,117 +1245,13 @@ end
 --
 -------------------------------------------------------------------------
 
---Split a string, at patt delimiter, into a table
-function Misspelled:split(str, patt)
-	local vals = {}
-	local valindex = 0
-	local word = ""
-	-- need to add a trailing separator to catch the last value.
-	str = str .. patt
-	for i = 1, string_len(str) do
-		local cha = string_sub(str, i, i)
-		if cha ~= patt then
-			word = word .. cha
-		else
-			if word ~= nil then
-				vals[valindex] = word
-				valindex = valindex + 1
-				word = ""
-			else
-				-- in case we get a line with no data.
-				break
-			end
-		end
-
-	end
-	return vals
-end
-
-function Misspelled:tprint (t, indent, done)
-  -- in case we run it standalone outside of the Wow client Lua env
-  local Note = Note or print
-  --local Tell = Tell or io.write
-
-  -- show strings differently to distinguish them from numbers
-  local function show (val)
-    if type (val) == "string" then
-      return '"' .. val .. '"'
-    else
-      return tostring(val)
-    end -- if
-  end -- show
-  
-  -- entry point here
-  done = done or {}
-  indent = indent or 0
-  for key, value in pairs (t) do
-    print(string_rep(" ", indent)) -- indent it
-    if type (value) == "table" and not done [value] then
-      done [value] = true
-      Note (show (key), ":");
-      Misspelled:tprint(value, indent + 2, done)
-    else
-      print(show (key), "=")
-      print (show (value))
-    end
-  end
-end
-
 function Misspelled:print(...)
-	SELECTED_DOCK_FRAME:AddMessage(...)
-end
-
---Check your friends list to see if the string: name is on the friends list.
-function Misspelled:IsFriend(name)
-	local numFriends
-
-	if C_FriendList.GetNumFriends ~= nil then
-		numFriends = C_FriendList.GetNumFriends()
-		if numFriends > 0 then
-			for i = 1, numFriends do
-				if name == C_FriendList.GetFriendInfoByIndex(i) then
-					return true
-				end
-			end
-		end
+	local chatFrame = SELECTED_DOCK_FRAME or DEFAULT_CHAT_FRAME
+	if chatFrame then
+		chatFrame:AddMessage(...)
 	end
-	return false
 end
 
---check the guild roster to see if the string: name, is a guild member.
-function Misspelled:IsGuildMember(name)
-	local numGuildMembers
-
-	if IsInGuild() then
-		numGuildMembers = GetNumGuildMembers(true);	-- true to include offline members
-		if ( numGuildMembers > 0 ) then
-			for i=1, numGuildMembers do
-				if name == GetGuildRosterInfo(i) then
-					return true
-				end
-			end
-		end
-	end
-
-	return false
-end
 -------------------------------------------------------------------------
 -- End: Utility Routines
 -------------------------------------------------------------------------
-
-
---[[
---testing
-require("bit")
-require("WordDict")
---~ require("Dict\\Dic_en_US")
---~ Misspelled_DB = {}
---~ WordDict:Init()
---~ ChatFrameEditBox = {}
---~ function ChatFrameEditBox:GetText()
---~ 	return "Leatherworking"
---~ end
-s = "Test |cffff91c8A|cffxxxxxxBSecondWord|r|r"
-s2 = string.gsub(s, SPELLED_WRONG_HIGHLIGHT .. "(.-)|r", function(x) return x end)
-print(s2)
----]]

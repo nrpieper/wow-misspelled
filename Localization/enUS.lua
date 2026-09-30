@@ -11,6 +11,7 @@ L["(Friend)"] = true
 L["Ignore All"] = true
 L["Add to Dictionary"] = true
 L["Cancel"] = true
+L["Fixing words is paused during combat and encounters"] = true
 
 --User Dictionary Editor Window
 L["User Dictionary"] = true
